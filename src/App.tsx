@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Separator } from '@/components/ui/separator'
 import {
   Sidebar,
   SidebarContent,
@@ -30,7 +31,7 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import type { DashboardData, FitbitAuthStatus, FitbitConfigInput, HealthProvider, PageId } from '@/types'
+import type { AssistantProviderDescriptor, AssistantProviderId, DashboardData, FitbitAuthStatus, FitbitConfigInput, HealthAssistantStatus, HealthProvider, PageId } from '@/types'
 import { createDemoData, localIso } from '@/data/demo'
 import { normalizeFitbitData } from '@/data/normalize'
 import { formatDate, relativeTime } from '@/lib/format'
@@ -758,7 +759,98 @@ function SettingsDialog({
             </DialogFooter>
           </form>
         )}
+
+        <Separator className="settings-separator" />
+        <AssistantProviderSettings />
       </DialogContent>
     </Dialog>
+  )
+}
+
+const DEFAULT_ASSISTANT_PROVIDERS: AssistantProviderDescriptor[] = [
+  { id: 'claude', label: 'Claude' },
+  { id: 'codex', label: 'Codex' },
+]
+
+const ASSISTANT_PROVIDER_HINT: Record<AssistantProviderId, string> = {
+  claude: 'Uses your Claude Pro/Max subscription. Run `claude login` (or `claude setup-token`) in a terminal — no API key is ever stored.',
+  codex: 'Reuses Codex Desktop’s local sign-in. Open Codex Desktop and sign in if it isn’t already connected.',
+}
+
+function AssistantProviderSettings() {
+  const hasBridge = Boolean(window.healthAssistant)
+  const [status, setStatus] = useState<HealthAssistantStatus | null>(null)
+  const [providers, setProviders] = useState(DEFAULT_ASSISTANT_PROVIDERS)
+  const [switching, setSwitching] = useState(false)
+
+  const refresh = useCallback(async () => {
+    if (!window.healthAssistant) return
+    try {
+      const [nextStatus, list] = await Promise.all([window.healthAssistant.getStatus(), window.healthAssistant.getProviders()])
+      setStatus(nextStatus)
+      if (list?.length) setProviders(list)
+    } catch {
+      // Keep whatever we last knew; the picker just won't reflect a fresher state.
+    }
+  }, [])
+
+  useEffect(() => { void refresh() }, [refresh])
+
+  const select = async (id: AssistantProviderId) => {
+    if (!window.healthAssistant || switching || status?.activeProvider === id) return
+    setSwitching(true)
+    try {
+      setStatus(await window.healthAssistant.setProvider(id))
+    } catch {
+      await refresh()
+    } finally {
+      setSwitching(false)
+    }
+  }
+
+  if (!hasBridge) {
+    return (
+      <div className="assistant-settings">
+        <h3>AI assistant</h3>
+        <p className="assistant-settings-hint">Launch OpenFit in the desktop app to choose an assistant.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="assistant-settings">
+      <h3>AI assistant</h3>
+      <div className="provider-picker" role="radiogroup" aria-label="AI assistant provider">
+        {providers.map((entry) => {
+          const providerStatus = status?.providers[entry.id]
+          const badge = !providerStatus || providerStatus.available === null
+            ? 'Checking…'
+            : providerStatus.available === false
+              ? 'Not found'
+              : !providerStatus.authenticated
+                ? 'Sign in required'
+                : 'Ready'
+          const active = status?.activeProvider === entry.id
+          return (
+            <label key={entry.id} className={cn(active && 'active')}>
+              <input
+                className="sr-only"
+                type="radio"
+                name="assistant-provider"
+                value={entry.id}
+                checked={active}
+                disabled={switching}
+                onChange={() => void select(entry.id)}
+              />
+              <SparkleIcon /><span><strong>{entry.label}</strong><small>{badge}</small></span>{active && <CheckIcon />}
+            </label>
+          )
+        })}
+      </div>
+      <div className="scope-note">
+        <ShieldIcon />
+        <p>{ASSISTANT_PROVIDER_HINT[status?.activeProvider ?? 'claude']} Read-only: no tool calls, no file or shell access, no health data leaves this computer except the compact context you send.</p>
+      </div>
+    </div>
   )
 }

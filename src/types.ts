@@ -241,22 +241,75 @@ export interface FitbitBridge {
   onSyncProgress: (callback: (progress: { completed: number; total: number; key: string; date?: string }) => void) => () => void
 }
 
-export interface HealthAssistantStatus {
-  available: boolean
+export type AssistantProviderId = 'claude' | 'codex'
+
+export interface AssistantProviderStatus {
+  provider: AssistantProviderId
+  state: string
+  available: boolean | null
   connected: boolean
   authenticated: boolean
+  busy: boolean
+  threadId: string | null
+  turnId: string | null
+  lastError: string | null
   version: string | null
-  error?: string
+}
+
+export interface AssistantFallbackInfo {
+  from: AssistantProviderId
+  to: AssistantProviderId
+  reason: string
+  at: number
+}
+
+export interface HealthAssistantStatus {
+  activeProvider: AssistantProviderId
+  providers: Partial<Record<AssistantProviderId, AssistantProviderStatus>>
+  lastFallback: AssistantFallbackInfo | null
+}
+
+export interface AssistantProviderDescriptor {
+  id: AssistantProviderId
+  label: string
+}
+
+export interface AssistantUsageEntry {
+  provider: AssistantProviderId
+  at: string
+  ok: boolean
+  cacheHit: boolean
+  durationMs: number | null
+  turnsUsed: number | null
+  costUsd: number | null
+  error: string | null
+}
+
+export interface AssistantUsageSummary {
+  turnsStarted: number
+  turnsCompleted: number
+  turnsFailed: number
+  cacheHits: number
+  totalDurationMs: number
+  lastUsedAt: string | null
+}
+
+export interface AssistantUsageLog {
+  summary: Partial<Record<AssistantProviderId, AssistantUsageSummary>>
+  entries: AssistantUsageEntry[]
 }
 
 export type HealthAssistantEvent =
   | { requestId: string; type: 'delta'; delta: string }
-  | { requestId: string; type: 'complete'; text?: string }
+  | { requestId: string; type: 'complete'; text?: string; provider?: AssistantProviderId; fallbackFrom?: AssistantProviderId | null; cacheHit?: boolean; meta?: { turnsUsed: number | null; durationMs: number | null; costUsd: number | null } | null }
   | { requestId: string; type: 'error'; message: string }
   | { requestId: string; type: 'cancelled' }
 
 export interface HealthAssistantBridge {
   getStatus: () => Promise<HealthAssistantStatus>
+  getProviders: () => Promise<AssistantProviderDescriptor[]>
+  setProvider: (id: AssistantProviderId) => Promise<HealthAssistantStatus>
+  getUsage: () => Promise<AssistantUsageLog>
   startTurn: (input: {
     requestId: string
     message: string

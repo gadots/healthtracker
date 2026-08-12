@@ -24,6 +24,9 @@ contextBridge.exposeInMainWorld('fitbit', Object.freeze({
 
 contextBridge.exposeInMainWorld('healthAssistant', Object.freeze({
   getStatus: () => ipcRenderer.invoke('assistant:get-status'),
+  getProviders: () => ipcRenderer.invoke('assistant:get-providers'),
+  setProvider: (id) => ipcRenderer.invoke('assistant:set-provider', id),
+  getUsage: () => ipcRenderer.invoke('assistant:get-usage'),
   startTurn: (input) => ipcRenderer.invoke('assistant:start-turn', input),
   cancel: (requestId) => ipcRenderer.invoke('assistant:cancel', requestId),
   reset: () => ipcRenderer.invoke('assistant:reset'),

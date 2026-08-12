@@ -10,7 +10,7 @@ import {
   type ChatModelAdapter,
   type ThreadMessage,
 } from '@assistant-ui/react'
-import { ArrowDown, ArrowUp, Plus, Sparkles, Square, X } from 'lucide-react'
+import { ArrowDown, ArrowLeftRight, ArrowUp, Plus, Sparkles, Square, TriangleAlert, X } from 'lucide-react'
 import { normalizeFitbitData } from '@/data/normalize'
 import {
   buildHealthAssistantContext,
@@ -19,7 +19,11 @@ import {
   visibleAssistantText,
   type AssistantNavigation,
 } from '@/lib/health-assistant'
+import { relativeTime } from '@/lib/format'
 import type {
+  AssistantProviderDescriptor,
+  AssistantProviderId,
+  AssistantProviderStatus,
   DashboardData,
   HealthAssistantEvent,
   HealthAssistantStatus,
@@ -28,10 +32,41 @@ import type {
 } from '@/types'
 
 const unavailableStatus: HealthAssistantStatus = {
+  activeProvider: 'claude',
+  providers: {},
+  lastFallback: null,
+}
+
+const unavailableProviderStatus: AssistantProviderStatus = {
+  provider: 'claude',
+  state: 'idle',
   available: false,
   connected: false,
   authenticated: false,
+  busy: false,
+  threadId: null,
+  turnId: null,
+  lastError: null,
   version: null,
+}
+
+const DEFAULT_PROVIDERS: AssistantProviderDescriptor[] = [
+  { id: 'claude', label: 'Claude' },
+  { id: 'codex', label: 'Codex' },
+]
+
+const SIGN_IN_HINT: Record<AssistantProviderId, string> = {
+  claude: 'Run `claude login` (or `claude setup-token`) in a terminal.',
+  codex: 'Open Codex Desktop and sign in.',
+}
+
+interface LastResponseMeta {
+  provider: AssistantProviderId
+  fallbackFrom: AssistantProviderId | null
+  cacheHit: boolean
+  turnsUsed: number | null
+  costUsd: number | null
+  at: string
 }
 
 function messageText(message: ThreadMessage | undefined) {
@@ -50,11 +85,21 @@ function archiveData(archive: RawHealthArchive | null | undefined) {
     .sort((left, right) => left.selectedDate.localeCompare(right.selectedDate))
 }
 
-function statusLabel(status: HealthAssistantStatus, hasBridge: boolean) {
+function activeProviderStatus(status: HealthAssistantStatus): AssistantProviderStatus {
+  return status.providers[status.activeProvider] ?? { ...unavailableProviderStatus, provider: status.activeProvider }
+}
+
+function providerLabel(id: AssistantProviderId, providers: AssistantProviderDescriptor[]) {
+  return providers.find((entry) => entry.id === id)?.label ?? id
+}
+
+function statusLabel(status: HealthAssistantStatus, providers: AssistantProviderDescriptor[], hasBridge: boolean) {
   if (!hasBridge) return 'Desktop only'
-  if (!status.available) return 'Codex not found'
-  if (!status.authenticated) return 'Sign in to Codex'
-  return status.connected ? 'Codex connected' : 'Codex ready'
+  const current = activeProviderStatus(status)
+  const label = providerLabel(status.activeProvider, providers)
+  if (current.available === false) return `${label} not found`
+  if (!current.authenticated) return `Sign in to ${label}`
+  return current.connected ? `${label} connected` : `${label} ready`
 }
 
 function createQueue() {
@@ -96,10 +141,15 @@ export function HealthAssistant({
   const pageRef = useRef(page)
   const navigateRef = useRef(onNavigate)
   const [status, setStatus] = useState(unavailableStatus)
+  const [providers, setProviders] = useState(DEFAULT_PROVIDERS)
+  const [switchingProvider, setSwitchingProvider] = useState(false)
+  const [lastResponse, setLastResponse] = useState<LastResponseMeta | null>(null)
+  const activeProviderRef = useRef(status.activeProvider)
 
   useEffect(() => { dataRef.current = data }, [data])
   useEffect(() => { pageRef.current = page }, [page])
   useEffect(() => { navigateRef.current = onNavigate }, [onNavigate])
+  useEffect(() => { activeProviderRef.current = status.activeProvider }, [status.activeProvider])
 
   const refreshStatus = useCallback(async () => {
     if (!window.healthAssistant) {
@@ -108,11 +158,8 @@ export function HealthAssistant({
     }
     try {
       setStatus(await window.healthAssistant.getStatus())
-    } catch (error) {
-      setStatus({
-        ...unavailableStatus,
-        error: error instanceof Error ? error.message : 'Codex is unavailable.',
-      })
+    } catch {
+      setStatus(unavailableStatus)
     }
   }, [])
 
@@ -120,6 +167,25 @@ export function HealthAssistant({
   useEffect(() => {
     if (open) void refreshStatus()
   }, [open, refreshStatus])
+  useEffect(() => {
+    if (!window.healthAssistant) return
+    window.healthAssistant.getProviders()
+      .then((list) => { if (list?.length) setProviders(list) })
+      .catch(() => undefined)
+  }, [])
+
+  const switchProvider = useCallback(async (id: AssistantProviderId) => {
+    if (!window.healthAssistant || id === activeProviderRef.current || switchingProvider) return
+    setSwitchingProvider(true)
+    try {
+      setStatus(await window.healthAssistant.setProvider(id))
+      setLastResponse(null)
+    } catch {
+      await refreshStatus()
+    } finally {
+      setSwitchingProvider(false)
+    }
+  }, [refreshStatus, switchingProvider])
 
   const modelAdapter = useMemo<ChatModelAdapter>(() => ({
     async *run({ messages, abortSignal }) {
@@ -167,6 +233,14 @@ export function HealthAssistant({
           } else if (event.type === 'complete') {
             completed = true
             if (event.text) fullText = event.text
+            setLastResponse({
+              provider: event.provider ?? activeProviderRef.current,
+              fallbackFrom: event.fallbackFrom ?? null,
+              cacheHit: Boolean(event.cacheHit),
+              turnsUsed: event.meta?.turnsUsed ?? null,
+              costUsd: event.meta?.costUsd ?? null,
+              at: new Date().toISOString(),
+            })
           } else if (event.type === 'error') {
             throw new Error(event.message)
           } else {
@@ -177,7 +251,7 @@ export function HealthAssistant({
         const navigation = parseAssistantNavigation(fullText)
         const finalText = stripAssistantNavigation(fullText)
         if (navigation) navigateRef.current(navigation)
-        if (!finalText) throw new Error('Codex completed the turn without a response.')
+        if (!finalText) throw new Error('The assistant completed the turn without a response.')
         if (finalText !== lastVisibleText) {
           yield { content: [{ type: 'text', text: finalText }] }
         }
@@ -191,7 +265,8 @@ export function HealthAssistant({
   }), [refreshStatus])
 
   const runtime = useLocalRuntime(modelAdapter)
-  const ready = Boolean(window.healthAssistant && status.available && status.authenticated)
+  const currentProviderStatus = activeProviderStatus(status)
+  const ready = Boolean(window.healthAssistant && currentProviderStatus.available && currentProviderStatus.authenticated)
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
@@ -204,11 +279,14 @@ export function HealthAssistant({
       >
         <AssistantHeader
           status={status}
+          providers={providers}
+          switchingProvider={switchingProvider}
           ready={ready}
           onClose={() => onOpenChange(false)}
           onStatusRefresh={refreshStatus}
+          onSwitchProvider={switchProvider}
         />
-        <AssistantThread ready={ready} />
+        <AssistantThread ready={ready} activeProvider={status.activeProvider} lastResponse={lastResponse} providers={providers} />
       </aside>
       {open && <button className="assistant-scrim" aria-label="Close health assistant" onClick={() => onOpenChange(false)} />}
     </AssistantRuntimeProvider>
@@ -217,14 +295,20 @@ export function HealthAssistant({
 
 function AssistantHeader({
   status,
+  providers,
+  switchingProvider,
   ready,
   onClose,
   onStatusRefresh,
+  onSwitchProvider,
 }: {
   status: HealthAssistantStatus
+  providers: AssistantProviderDescriptor[]
+  switchingProvider: boolean
   ready: boolean
   onClose: () => void
   onStatusRefresh: () => Promise<void>
+  onSwitchProvider: (id: AssistantProviderId) => Promise<void>
 }) {
   const runtime = useAssistantRuntime()
 
@@ -241,7 +325,7 @@ function AssistantHeader({
         <span className="assistant-mark"><Sparkles aria-hidden="true" /></span>
         <span>
           <strong>Health assistant</strong>
-          <small><i className={ready ? 'is-ready' : ''} />{statusLabel(status, Boolean(window.healthAssistant))}</small>
+          <small><i className={ready ? 'is-ready' : ''} />{statusLabel(status, providers, Boolean(window.healthAssistant))}</small>
         </span>
       </div>
       <div className="assistant-header-actions">
@@ -252,11 +336,53 @@ function AssistantHeader({
           <X aria-hidden="true" />
         </button>
       </div>
+      {providers.length > 1 && (
+        <div className="assistant-provider-switch" role="radiogroup" aria-label="Assistant provider">
+          {providers.map((entry) => (
+            <button
+              key={entry.id}
+              type="button"
+              role="radio"
+              aria-checked={status.activeProvider === entry.id}
+              className={status.activeProvider === entry.id ? 'is-active' : ''}
+              disabled={switchingProvider}
+              onClick={() => void onSwitchProvider(entry.id)}
+            >
+              {entry.label}
+            </button>
+          ))}
+          {switchingProvider && <ArrowLeftRight className="assistant-provider-switch-spin" aria-hidden="true" />}
+        </div>
+      )}
     </header>
   )
 }
 
-function AssistantThread({ ready }: { ready: boolean }) {
+function responseMetaLabel(lastResponse: LastResponseMeta | null, providers: AssistantProviderDescriptor[]) {
+  if (!lastResponse) return null
+  const parts = [providerLabel(lastResponse.provider, providers)]
+  if (lastResponse.cacheHit) parts.push('cached answer')
+  if (lastResponse.turnsUsed !== null) parts.push(`${lastResponse.turnsUsed} turn${lastResponse.turnsUsed === 1 ? '' : 's'}`)
+  if (lastResponse.costUsd !== null) parts.push(`$${lastResponse.costUsd.toFixed(4)}`)
+  parts.push(relativeTime(lastResponse.at))
+  return parts.join(' · ')
+}
+
+function AssistantThread({
+  ready,
+  activeProvider,
+  lastResponse,
+  providers,
+}: {
+  ready: boolean
+  activeProvider: AssistantProviderId
+  lastResponse: LastResponseMeta | null
+  providers: AssistantProviderDescriptor[]
+}) {
+  const fallbackNotice = lastResponse?.fallbackFrom
+    ? `${providerLabel(lastResponse.fallbackFrom, providers)} wasn't available — this answer came from ${providerLabel(lastResponse.provider, providers)}.`
+    : null
+  const meta = responseMetaLabel(lastResponse, providers)
   return (
     <ThreadPrimitive.Root className="assistant-thread">
       <ThreadPrimitive.Viewport className="assistant-viewport">
@@ -282,12 +408,17 @@ function AssistantThread({ ready }: { ready: boolean }) {
           <ThreadPrimitive.ScrollToBottom className="assistant-scroll-bottom" aria-label="Scroll to latest response">
             <ArrowDown aria-hidden="true" />
           </ThreadPrimitive.ScrollToBottom>
+          {fallbackNotice && (
+            <p className="assistant-fallback-notice" role="status">
+              <TriangleAlert aria-hidden="true" />{fallbackNotice}
+            </p>
+          )}
           <ComposerPrimitive.Root className="assistant-composer">
             <ComposerPrimitive.Input
               className="assistant-composer-input"
               rows={1}
               disabled={!ready}
-              placeholder={ready ? 'Ask about your health…' : 'Connect Codex Desktop to chat'}
+              placeholder={ready ? 'Ask about your health…' : SIGN_IN_HINT[activeProvider]}
               aria-label="Message health assistant"
             />
             <AuiIf condition={(state) => !state.thread.isRunning}>
@@ -301,7 +432,7 @@ function AssistantThread({ ready }: { ready: boolean }) {
               </ComposerPrimitive.Cancel>
             </AuiIf>
           </ComposerPrimitive.Root>
-          <p className="assistant-disclaimer">Health context, not medical advice.</p>
+          <p className="assistant-disclaimer">{meta ? `${meta} · Health context, not medical advice.` : 'Health context, not medical advice.'}</p>
         </ThreadPrimitive.ViewportFooter>
       </ThreadPrimitive.Viewport>
     </ThreadPrimitive.Root>

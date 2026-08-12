@@ -10,7 +10,9 @@ const { fileURLToPath } = require('node:url')
 const googleHealth = require('./google-health-service.cjs')
 const fitbitLegacy = require('./fitbit-legacy-service.cjs')
 const healthCache = require('./health-cache.cjs')
-const { createCodexService, resolveCodexBinary } = require('./codex-service.cjs')
+const { createCodexService } = require('./codex-service.cjs')
+const { createClaudeService } = require('./claude-service.cjs')
+const { createAssistantManager } = require('./assistant-manager.cjs')
 
 app.commandLine.appendSwitch('lang', 'en-US')
 
@@ -25,14 +27,17 @@ const PROVIDERS = {
   'google-health': googleHealth,
   'fitbit-legacy': fitbitLegacy,
 }
+const DEFAULT_ASSISTANT_PROVIDER = 'claude'
+const ASSISTANT_PROVIDER_IDS = new Set(['claude', 'codex'])
 
 let mainWindow = null
 let oauthServer = null
 let oauthTimeout = null
 let credentialFile = null
 let cacheFile = null
+let assistantSettingsFile = null
 let syncInFlight = null
-let codexService = null
+let assistantManager = null
 let assistantRequestId = null
 
 function atomicWrite(file, content) {
@@ -92,6 +97,19 @@ function getCredentials() {
 
 function saveCredentials(credentials) {
   writeSecure(credentialFile, credentials)
+}
+
+// The assistant provider preference lives in its own encrypted file, separate
+// from the Google/Fitbit OAuth credentials: different concern, different
+// failure mode, and it means switching assistants never touches health-data
+// auth state.
+function getAssistantSettings() {
+  const stored = readSecure(assistantSettingsFile, { provider: DEFAULT_ASSISTANT_PROVIDER })
+  return { provider: ASSISTANT_PROVIDER_IDS.has(stored.provider) ? stored.provider : DEFAULT_ASSISTANT_PROVIDER }
+}
+
+function saveAssistantSettings(settings) {
+  writeSecure(assistantSettingsFile, settings)
 }
 
 function publicStatus() {
@@ -311,12 +329,12 @@ function sendAssistantEvent(event) {
 }
 
 function assistantErrorMessage(error) {
-  const message = error instanceof Error ? error.message : 'Codex is unavailable right now.'
+  const message = error instanceof Error ? error.message : 'The assistant is unavailable right now.'
   return String(message)
     .replace(/[\u0000-\u001f\u007f]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 600) || 'Codex is unavailable right now.'
+    .slice(0, 600) || 'The assistant is unavailable right now.'
 }
 
 function validAssistantRequestId(value) {
@@ -436,19 +454,24 @@ function registerIpc() {
     return shell.openExternal(url.toString())
   })
   trustedHandle('assistant:get-status', () => {
-    const status = codexService?.getStatus() || {}
-    const available = status.available ?? Boolean(resolveCodexBinary())
-    const unauthorized = /unauthorized|not logged|sign in|authentication/i.test(String(status.lastError || ''))
-    return {
-      available,
-      connected: Boolean(status.connected),
-      authenticated: Boolean(available && !unauthorized),
-      version: null,
-      ...(status.lastError ? { error: status.lastError } : {}),
-    }
+    if (!assistantManager) return { activeProvider: DEFAULT_ASSISTANT_PROVIDER, providers: {}, lastFallback: null }
+    return assistantManager.getStatus()
+  })
+  trustedHandle('assistant:get-providers', () => {
+    return assistantManager?.listProviders() || []
+  })
+  trustedHandle('assistant:set-provider', (id) => {
+    if (!ASSISTANT_PROVIDER_IDS.has(id)) throw new Error('Unknown assistant provider.')
+    if (!assistantManager) throw new Error('The assistant bridge is not ready.')
+    // Persistence happens via the manager's onProviderChange hook (wired in
+    // app.whenReady), so a switch is durable even if the app quits right after.
+    return assistantManager.setActiveProvider(id)
+  })
+  trustedHandle('assistant:get-usage', () => {
+    return assistantManager?.getUsageLog() || { summary: {}, entries: [] }
   })
   trustedHandle('assistant:start-turn', (input) => {
-    if (!codexService) throw new Error('The Codex bridge is not ready.')
+    if (!assistantManager) throw new Error('The assistant bridge is not ready.')
     if (!input || !validAssistantRequestId(input.requestId)) throw new Error('Invalid assistant request.')
     const requestId = input.requestId
     if (assistantRequestId && assistantRequestId !== requestId) throw new Error('Wait for the current assistant response to finish.')
@@ -458,7 +481,7 @@ function registerIpc() {
     if (!healthContext || healthContext.length > 500_000) throw new Error('The health context is empty or too large.')
 
     assistantRequestId = requestId
-    void codexService.startTurn({
+    void assistantManager.startTurn({
       text: message,
       healthContext,
       onDelta: (delta) => {
@@ -467,11 +490,19 @@ function registerIpc() {
     }).then((result) => {
       if (assistantRequestId !== requestId) return
       assistantRequestId = null
-      sendAssistantEvent({ requestId, type: 'complete', text: result.text })
+      sendAssistantEvent({
+        requestId,
+        type: 'complete',
+        text: result.text,
+        provider: result.provider,
+        fallbackFrom: result.fallbackFrom || null,
+        cacheHit: Boolean(result.cacheHit),
+        meta: result.meta || null,
+      })
     }).catch((error) => {
       if (assistantRequestId !== requestId) return
       assistantRequestId = null
-      if (error?.name === 'AbortError' || error?.code === 'CODEX_TURN_CANCELLED') {
+      if (error?.name === 'AbortError' || /_TURN_CANCELLED$/.test(String(error?.code || ''))) {
         sendAssistantEvent({ requestId, type: 'cancelled' })
       } else {
         sendAssistantEvent({ requestId, type: 'error', message: assistantErrorMessage(error) })
@@ -481,11 +512,11 @@ function registerIpc() {
   })
   trustedHandle('assistant:cancel', async (requestId) => {
     if (!validAssistantRequestId(requestId) || assistantRequestId !== requestId) return
-    await codexService?.cancelTurn()
+    await assistantManager?.cancelTurn()
   })
   trustedHandle('assistant:reset', async () => {
     assistantRequestId = null
-    await codexService?.reset()
+    await assistantManager?.reset()
   })
 }
 
@@ -496,7 +527,18 @@ app.whenReady().then(() => {
   app.setPath('userData', userData)
   credentialFile = path.join(userData, 'credentials.secure.json')
   cacheFile = path.join(userData, 'health-cache.secure.json')
-  codexService = createCodexService({ cwd: userData, clientVersion: app.getVersion() })
+  assistantSettingsFile = path.join(userData, 'assistant-settings.secure.json')
+
+  const claudeService = createClaudeService({ cwd: userData, clientVersion: app.getVersion() })
+  const codexService = createCodexService({ cwd: userData, clientVersion: app.getVersion() })
+  assistantManager = createAssistantManager({
+    providers: [
+      { id: 'claude', provider: claudeService },
+      { id: 'codex', provider: codexService },
+    ],
+    defaultProviderId: getAssistantSettings().provider,
+    onProviderChange: (id) => saveAssistantSettings({ provider: id }),
+  })
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
   if (!developmentUrl()) {
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -523,5 +565,5 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   closeOAuthServer()
-  void codexService?.dispose()
+  void assistantManager?.dispose()
 })
