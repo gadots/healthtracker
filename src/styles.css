@@ -47,6 +47,10 @@
   --sleep-light: #0a84ff;
   --sleep-rem: #64d2ff;
   --sleep-wake: #ff9f0a;
+  --zone-light: #0a84ff;
+  --zone-moderate: #40c8e0;
+  --zone-vigorous: #ff9f0a;
+  --zone-peak: #ff453a;
   --radius: 0.625rem;
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
@@ -3173,3 +3177,55 @@ input:focus-visible,
   .sleep-timeline-label,
   .sleep-timeline-time { font-size: 11px; }
 }
+
+/* Derived scores (Recovery, Day Strain, Sleep Performance, Health Monitor) */
+
+.recovery-lead,
+.strain-lead {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding-top: 4px;
+}
+
+.strain-lead { justify-content: center; padding: 10px 0; }
+
+.recovery-lead p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.health-monitor-panel { padding: 2px 18px; }
+
+.health-monitor-row {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+}
+
+.health-monitor-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted-foreground);
+}
+
+.health-monitor-row.is-typical .health-monitor-dot { background: var(--color-emerald, #34c759); }
+.health-monitor-row.is-above-range .health-monitor-dot,
+.health-monitor-row.is-below-range .health-monitor-dot { background: var(--color-amber); }
+.health-monitor-row.is-insufficient-data .health-monitor-dot { background: var(--muted-foreground); opacity: 0.5; }
+
+.health-monitor-copy { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.health-monitor-copy strong { color: var(--foreground); font-size: 13px; font-weight: 510; }
+.health-monitor-copy span { color: var(--muted-foreground); font-size: 13px; }
+
+.health-monitor-value { display: flex; align-items: baseline; gap: 4px; text-align: right; }
+.health-monitor-value strong { color: var(--foreground); font-size: 15px; font-weight: 510; font-variant-numeric: tabular-nums; }
+.health-monitor-value small { color: var(--muted-foreground); font-size: 13px; }
+
+.nap-card { display: flex; flex-direction: column; gap: 2px; }
+

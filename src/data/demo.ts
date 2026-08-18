@@ -234,6 +234,15 @@ export function createDemoData(selectedDate = localIso()): DashboardData {
       minutesAfterWakeUp: 0,
       timeInBed: 433,
       minutesAwake: 38,
+      naps: [
+        {
+          id: 'nap-demo',
+          date: selectedDate,
+          startTime: `${selectedDate}T14:20:00`,
+          endTime: `${selectedDate}T14:47:00`,
+          durationMinutes: 27,
+        },
+      ],
     },
     body: {
       weightKg: latest.weight,

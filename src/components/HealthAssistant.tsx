@@ -11,7 +11,7 @@ import {
   type ThreadMessage,
 } from '@assistant-ui/react'
 import { ArrowDown, ArrowLeftRight, ArrowUp, Plus, Sparkles, Square, TriangleAlert, X } from 'lucide-react'
-import { normalizeFitbitData } from '@/data/normalize'
+import { normalizeHealthArchive } from '@/data/normalize'
 import {
   buildHealthAssistantContext,
   parseAssistantNavigation,
@@ -28,7 +28,6 @@ import type {
   HealthAssistantEvent,
   HealthAssistantStatus,
   PageId,
-  RawHealthArchive,
 } from '@/types'
 
 const unavailableStatus: HealthAssistantStatus = {
@@ -76,13 +75,6 @@ function messageText(message: ThreadMessage | undefined) {
     .map((part) => part.text)
     .join('\n')
     .trim()
-}
-
-function archiveData(archive: RawHealthArchive | null | undefined) {
-  if (!archive) return []
-  return Object.values(archive.days)
-    .map((payload) => normalizeFitbitData(payload))
-    .sort((left, right) => left.selectedDate.localeCompare(right.selectedDate))
 }
 
 function activeProviderStatus(status: HealthAssistantStatus): AssistantProviderStatus {
@@ -198,7 +190,7 @@ export function HealthAssistant({
       let archived: DashboardData[] = []
       if (window.fitbit && dataRef.current.source !== 'demo') {
         try {
-          archived = archiveData(await window.fitbit.getCachedArchive())
+          archived = normalizeHealthArchive(await window.fitbit.getCachedArchive())
         } catch {
           archived = []
         }

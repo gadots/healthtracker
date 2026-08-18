@@ -1,6 +1,6 @@
 import { useId, useLayoutEffect, useRef, useState } from 'react'
 import type { KeyboardEvent, PointerEvent, ReactNode } from 'react'
-import type { SleepStage, SleepStageSegment } from '../types'
+import type { HeartZoneMinutes, SleepStage, SleepStageSegment } from '../types'
 import { formatNumber, formatTime } from '../lib/format'
 
 type NumericValue = number | null
@@ -495,6 +495,60 @@ export function SleepStageBar({
         </div>
       )}
       {!compact && <p className="sleep-stage-caption">Percentages of the recorded period, including awake time.</p>}
+    </div>
+  )
+}
+
+const heartZoneConfig: Array<{ key: keyof HeartZoneMinutes; label: string }> = [
+  { key: 'light', label: 'Light' },
+  { key: 'moderate', label: 'Moderate' },
+  { key: 'vigorous', label: 'Vigorous' },
+  { key: 'peak', label: 'Peak' },
+]
+
+/** Same visual shape as SleepStageBar, own `--zone-*` palette — kept as a separate component so Sleep's stage colors are never affected by heart-rate zone styling. */
+export function HeartZoneBar({
+  zones,
+  compact = false,
+  showLegend = true,
+}: {
+  zones: HeartZoneMinutes
+  compact?: boolean
+  showLegend?: boolean
+}) {
+  const total = heartZoneConfig.reduce((sum, { key }) => sum + (zones[key] ?? 0), 0)
+  if (!total) return <div className="chart-empty is-small">No heart-rate zone data available</div>
+  return (
+    <div className={`sleep-stage-wrap ${compact ? 'is-compact' : ''}`}>
+      <div className="sleep-stage-bar" role="img" aria-label={`Heart-rate zone distribution: ${heartZoneConfig.map(({ key, label }) => `${label} ${zones[key] ?? 0} minutes`).join(', ')}`}>
+        {heartZoneConfig.map(({ key, label }) => {
+          const minutes = zones[key] ?? 0
+          if (!minutes) return null
+          return (
+            <div
+              key={key}
+              className="sleep-stage-segment"
+              style={{ width: `${minutes / total * 100}%`, background: `var(--zone-${key})` }}
+              title={`${label}: ${minutes} min (${Math.round(minutes / total * 100)}%)`}
+            />
+          )
+        })}
+      </div>
+      {showLegend && (
+        <div className="sleep-stage-legend">
+          {heartZoneConfig.map(({ key, label }) => {
+            const minutes = zones[key] ?? 0
+            if (!minutes) return null
+            return (
+              <div key={key}>
+                <span className="legend-dot" style={{ background: `var(--zone-${key})` }} />
+                <span>{label}</span>
+                <strong>{Math.round(minutes / total * 100)}% · {Math.floor(minutes / 60) ? `${Math.floor(minutes / 60)}h ` : ''}{minutes % 60}m</strong>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

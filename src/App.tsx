@@ -33,7 +33,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { AssistantProviderDescriptor, AssistantProviderId, DashboardData, FitbitAuthStatus, FitbitConfigInput, HealthAssistantStatus, HealthProvider, PageId } from '@/types'
 import { createDemoData, localIso } from '@/data/demo'
-import { normalizeFitbitData } from '@/data/normalize'
+import { normalizeFitbitData, normalizeHealthArchive } from '@/data/normalize'
 import { formatDate, relativeTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { ActivityView, BodyView, DevicesView, HealthView, SleepView, TodayView } from '@/components/Views'
@@ -116,6 +116,7 @@ export default function App() {
   const [page, setPage] = useState<PageId>('today')
   const [selectedDate, setSelectedDate] = useState(localIso())
   const [data, setData] = useState<DashboardData>(() => createDemoData())
+  const [archiveDays, setArchiveDays] = useState<DashboardData[]>([])
   const [status, setStatus] = useState(defaultStatus)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [assistantOpen, setAssistantOpen] = useState(false)
@@ -156,6 +157,19 @@ export default function App() {
       }
     } catch (error) {
       setToast({ tone: 'error', message: error instanceof Error ? error.message : 'Unable to read the local status.' })
+    }
+  }, [])
+
+  // Multi-day history behind the derived scores (Recovery, Strain, Sleep
+  // Need/Debt/Consistency): the same encrypted local archive the assistant
+  // panel already reads, normalized once here and threaded into the views.
+  const refreshArchive = useCallback(async () => {
+    if (!window.fitbit) return
+    try {
+      setArchiveDays(normalizeHealthArchive(await window.fitbit.getCachedArchive()))
+    } catch {
+      // Keep whatever history we already have; derived scores just fall
+      // back to fewer sample days until the next successful refresh.
     }
   }, [])
 
@@ -201,6 +215,7 @@ export default function App() {
           }
 
           void window.fitbit.getStatus().then(setStatus).catch(() => undefined)
+          if (!payload.cacheHit) void refreshArchive()
         } catch (error) {
           const queuedDate = queuedDateRef.current
           const failedDateIsStillSelected = selectedDateRef.current === date
@@ -225,10 +240,11 @@ export default function App() {
       setSyncTargetDate(null)
       setSyncProgress(null)
     }
-  }, [])
+  }, [refreshArchive])
 
   useEffect(() => {
     void loadNativeState()
+    void refreshArchive()
     if (!window.fitbit) return
     const unsubscribeAuth = window.fitbit.onAuthComplete(async (result) => {
       setConnecting(false)
@@ -253,7 +269,7 @@ export default function App() {
       unsubscribeAuth()
       unsubscribeSync()
     }
-  }, [loadNativeState, runSync])
+  }, [loadNativeState, refreshArchive, runSync])
 
   useEffect(() => {
     if (!toast) return
@@ -316,6 +332,7 @@ export default function App() {
     if (!window.fitbit) return
     setStatus(await window.fitbit.disconnect())
     setData(createDemoData(selectedDate))
+    setArchiveDays([])
     setSettingsOpen(false)
     setPage('today')
     setToast({ tone: 'success', message: 'Account disconnected and local data removed.' })
@@ -331,14 +348,14 @@ export default function App() {
   }
 
   const currentView = useMemo(() => {
-    const props = { data, status, navigate: setPage }
+    const props = { data, status, navigate: setPage, archiveDays }
     if (page === 'activity') return <ActivityView {...props} />
     if (page === 'health') return <HealthView {...props} />
     if (page === 'sleep') return <SleepView {...props} />
     if (page === 'body') return <BodyView {...props} />
     if (page === 'devices') return <DevicesView {...props} />
     return <TodayView {...props} />
-  }, [data, page, status])
+  }, [archiveDays, data, page, status])
 
   const isToday = selectedDate === localIso()
   const sourceLabel = status.connected

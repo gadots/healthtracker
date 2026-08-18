@@ -111,6 +111,7 @@ function compactDay(data: DashboardData) {
       minutesAfterWakeUp: data.sleep.minutesAfterWakeUp,
       timeInBedMinutes: data.sleep.timeInBed,
       minutesAwake: data.sleep.minutesAwake,
+      naps: data.sleep.naps.map((nap) => ({ startTime: nap.startTime, endTime: nap.endTime, durationMinutes: nap.durationMinutes })),
     },
     body: {
       weightKg: data.body.weightKg,

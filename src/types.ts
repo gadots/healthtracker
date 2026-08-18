@@ -79,6 +79,14 @@ export interface SleepStageCounts {
   wake: number | null
 }
 
+export interface NapItem {
+  id: string
+  date: string
+  startTime: string
+  endTime: string
+  durationMinutes: number
+}
+
 export interface DashboardData {
   source: DataSource
   selectedDate: string
@@ -157,6 +165,7 @@ export interface DashboardData {
     minutesAfterWakeUp: number | null
     timeInBed: number | null
     minutesAwake: number | null
+    naps: NapItem[]
   }
   body: {
     weightKg: number | null

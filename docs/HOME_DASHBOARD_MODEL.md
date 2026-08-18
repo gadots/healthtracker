@@ -7,7 +7,7 @@ The home screen is not a metric catalog. It should answer four questions, in ord
 3. **Which data explains the picture?**
 4. **Where can I find detail without losing context?**
 
-OpenFit does not generate a proprietary composite score. Every summary must trace back to a measurement, an explicit goal, or a visible personal baseline.
+Every summary must trace back to a measurement, an explicit goal, or a visible personal baseline. OpenFit does not reproduce any manufacturer's proprietary algorithm (Whoop Recovery/Strain, Fitbit Readiness, and similar are not implemented here) and does not present a derived number as a medical measurement. It does compute a small set of **OpenFit-original** composite scores (Recovery, Day Strain, Sleep Performance, Sleep Need/Debt/Consistency — see `docs/DERIVED_SCORES.md`) from the same raw measurements and personal baselines already on this screen. Each one states its own formula and inputs, is visually distinct from raw-measurement tiles, and is hidden rather than guessed when it doesn't have enough data to be meaningful.
 
 ## Metric Hierarchy
 
@@ -18,6 +18,7 @@ OpenFit does not generate a proprietary composite score. Every summary must trac
 | Personal signals | HRV, SpO2, respiration, and skin temperature | meaningful mostly against the same user's baseline |
 | Secondary context | weight, body fat, water, and logged calories | useful over time or dependent on diary completeness. They do not define the day by themselves |
 | Detail / alerts | intraday HR, ECG, glucose, irregular rhythm, VO2 max | require timestamps, context, or interpretation caution. They appear on home only when an explicit alert exists |
+| Derived | Recovery, Day Strain, Sleep Performance, Sleep Need/Debt/Consistency | OpenFit-original estimates built from the rows above; shown separately with their formula documented, hidden below their confidence threshold |
 | Operational | device, battery, sync, and errors | indicate reliability and availability, not wellbeing |
 
 ## Chart Contract
@@ -43,6 +44,7 @@ Color identifies a category, not a clinical state. Text, icon, shape, and unit m
 - Weight and body fat should be read as trends. Bioimpedance is an estimate that depends on measurement conditions.
 - Water and calorie intake are labeled as logged. Missing logs do not equal zero.
 - `successCount / endpointCount` describes completed API reads, not clinical data completeness.
+- Derived scores (Recovery, Day Strain, Sleep Performance, Sleep Need/Debt/Consistency) are OpenFit's own estimate, not a reproduction of any manufacturer's proprietary formula. Each carries a visible "estimate" label and a minimum-sample-size gate below which it is hidden rather than shown with low confidence.
 
 ## Reference Sources
 

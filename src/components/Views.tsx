@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
-import type { ActivityItem, DashboardData, FitbitAuthStatus, PageId, TimePoint } from '@/types'
-import { BulletChart, ColumnChart, LineChart, RadialProgress, SleepStageBar, SleepStageTimeline } from './Charts'
+import type { ActivityItem, DashboardData, FitbitAuthStatus, NapItem, PageId, TimePoint } from '@/types'
+import { BulletChart, ColumnChart, HeartZoneBar, LineChart, RadialProgress, SleepStageBar, SleepStageTimeline } from './Charts'
 import { DuoIcon, EmptyValue, MetricTile, Panel, PanelHeader } from './Shared'
 import type { AppIcon } from './icons'
 import {
@@ -43,11 +43,22 @@ import {
 import { availableMetricCount, hasActivityData, hasBodyData, hasHealthData, hasSleepData } from '@/lib/data-availability'
 import { analyzeHome } from '@/lib/home-analysis'
 import type { BaselineComparison } from '@/lib/home-analysis'
+import {
+  buildHealthMonitor,
+  computeDailyHeartRateZones,
+  computeDayStrain,
+  computeRecoveryScore,
+  computeSleepPerformance,
+  estimateMaxHeartRate,
+} from '@/lib/scores'
+import type { HealthMonitorMetric, RangeFlag } from '@/lib/scores'
 
 interface ViewProps {
   data: DashboardData
   status: FitbitAuthStatus
   navigate: (page: PageId) => void
+  /** Prior cached days, oldest first. Powers the multi-day derived scores (Recovery, Strain, Sleep Need/Debt/Consistency). */
+  archiveDays: DashboardData[]
 }
 
 interface Signal {
@@ -221,6 +232,54 @@ function sleepScoreCategory(value: number) {
   return 'Poor'
 }
 
+function healthMonitorFlagLabel(flag: RangeFlag) {
+  if (flag === 'above-range') return 'Above your typical range'
+  if (flag === 'below-range') return 'Below your typical range'
+  if (flag === 'typical') return 'Within your typical range'
+  return 'Building your typical range'
+}
+
+function HealthMonitorRow({ metric }: { metric: HealthMonitorMetric }) {
+  return (
+    <div className={`health-monitor-row is-${metric.flag}`}>
+      <span className="health-monitor-dot" aria-hidden="true" />
+      <div className="health-monitor-copy">
+        <strong>{metric.label}</strong>
+        <span>{healthMonitorFlagLabel(metric.flag)}</span>
+      </div>
+      <div className="health-monitor-value"><strong>{formatDecimal(metric.value)}</strong><small>{metric.unit}</small></div>
+    </div>
+  )
+}
+
+const strainBandColor: Record<string, string> = {
+  light: 'var(--zone-light)',
+  moderate: 'var(--zone-moderate)',
+  strenuous: 'var(--zone-vigorous)',
+  'all-out': 'var(--zone-peak)',
+}
+
+const recoveryBandColor: Record<string, string> = {
+  low: 'var(--color-amber)',
+  moderate: 'var(--category-recovery)',
+  high: 'var(--color-emerald)',
+}
+
+function napDuration(nap: NapItem) {
+  const hours = Math.floor(nap.durationMinutes / 60)
+  return hours ? `${hours}h ${nap.durationMinutes % 60}m` : `${nap.durationMinutes}m`
+}
+
+function NapRow({ nap }: { nap: NapItem }) {
+  return (
+    <div className="activity-row">
+      <DuoIcon icon={SleepIcon} className="activity-icon" />
+      <div className="activity-copy"><strong>Nap</strong><span>{formatTime(nap.startTime)} – {formatTime(nap.endTime)}</span></div>
+      <div className="activity-meta"><span>{napDuration(nap)}</span></div>
+    </div>
+  )
+}
+
 type HomeCategory = 'activity' | 'heart' | 'sleep' | 'recovery' | 'body'
 
 const trendColors: Record<HomeCategory, string> = {
@@ -360,6 +419,8 @@ function VitalSnapshot({
 
 export function TodayView({ data, navigate }: ViewProps) {
   const analysis = analyzeHome(data)
+  const sleepPerformance = computeSleepPerformance(data)
+  const recovery = computeRecoveryScore(data, sleepPerformance)
   const stepsByHour = hourlyBuckets(data.activity.stepsIntraday)
   const steps = hasValue(data.activity.steps) ? data.activity.steps : null
   const hasSteps = steps !== null
@@ -427,6 +488,9 @@ export function TodayView({ data, navigate }: ViewProps) {
               <DailySummaryMetric category="activity" icon={StepsIcon} label="Movement" value={hasSteps ? formatNumber(steps) : '—'} note={hasSteps ? activityNote : 'Unavailable'} onClick={() => navigate('activity')} />
               <DailySummaryMetric category="sleep" icon={SleepIcon} label="Sleep" value={hasSleep ? sleepPrimaryValue : '—'} note={hasSleep ? sleepNote : 'Unavailable'} onClick={() => navigate('sleep')} />
               <DailySummaryMetric category="heart" icon={HeartIcon} label="Resting heart rate" value={hasValue(data.health.restingHeartRate) ? `${formatNumber(data.health.restingHeartRate)} bpm` : '—'} note={hasValue(data.health.restingHeartRate) ? heartNote : 'Unavailable'} onClick={() => navigate('health')} />
+              {recovery.value !== null && (
+                <DailySummaryMetric category="recovery" icon={SignalIcon} label="Recovery" value={`${recovery.value}`} note={`${recovery.band} · estimate`} onClick={() => navigate('health')} />
+              )}
             </div>
           </HomeSection>
 
@@ -546,7 +610,9 @@ export function TodayView({ data, navigate }: ViewProps) {
   )
 }
 
-export function ActivityView({ data }: ViewProps) {
+export function ActivityView({ data, archiveDays }: ViewProps) {
+  const strain = computeDayStrain(data, archiveDays)
+  const zones = computeDailyHeartRateZones(data, archiveDays)
   const stepValues = data.trends.map((point) => point.steps)
   const validSteps = stepValues.filter(hasValue)
   const averageSteps = validSteps.length ? validSteps.reduce((sum, value) => sum + value, 0) / validSteps.length : null
@@ -606,6 +672,26 @@ export function ActivityView({ data }: ViewProps) {
         )}
       </div>
 
+      {strain.value !== null && (
+        <section>
+          <SectionTitle title="Day Strain" copy="OpenFit estimate of cumulative cardiovascular effort today, from your heart-rate zones — not a reproduction of any manufacturer's formula." />
+          <div className="chart-grid activity-chart-grid">
+            <Panel className="strain-card" category="heart">
+              <PanelHeader title="Day Strain" icon={GaugeIcon} />
+              <div className="strain-lead">
+                <RadialProgress value={strain.value} max={21} color={strainBandColor[strain.band ?? 'light']} label={strain.band ?? ''} valueLabel={formatDecimal(strain.value, 1)} size={116} />
+              </div>
+            </Panel>
+            {zones && (
+              <Panel className="zone-card" category="heart">
+                <PanelHeader title="Heart-rate zones" icon={HeartIcon} />
+                <HeartZoneBar zones={zones.zones} />
+              </Panel>
+            )}
+          </div>
+        </section>
+      )}
+
       {hasActivityTrends && (
         <section>
           <SectionTitle title="Activity trends" copy="Daily series returned by Google Health." />
@@ -633,12 +719,16 @@ export function ActivityView({ data }: ViewProps) {
   )
 }
 
-export function HealthView({ data }: ViewProps) {
+export function HealthView({ data, archiveDays }: ViewProps) {
   const heartValues = data.health.heartRateIntraday.map((point) => point.value)
   const heartLabels = data.health.heartRateIntraday.map((point) => point.time)
   const restingValues = data.trends.map((point) => point.restingHeartRate)
   const restingCount = restingValues.filter(hasValue).length
   const signals = overnightSignals(data)
+  const maxHeartRate = estimateMaxHeartRate(data, archiveDays)
+  const healthMonitor = buildHealthMonitor(data)
+  const sleepPerformance = computeSleepPerformance(data)
+  const recovery = computeRecoveryScore(data, sleepPerformance)
   const secondary = presentSignals([
     hasValue(data.health.cardioScore) ? { label: 'Cardio fitness', value: formatNumber(data.health.cardioScore), note: 'Latest score', icon: GaugeIcon } : null,
     hasValue(data.health.bloodGlucoseMgDl) ? { label: 'Blood glucose', value: formatNumber(data.health.bloodGlucoseMgDl), unit: 'mg/dL', note: 'Latest measurement', icon: WaterIcon } : null,
@@ -666,6 +756,7 @@ export function HealthView({ data }: ViewProps) {
             {hasValue(data.health.currentHeartRate) && <div className="primary-kpi"><strong>{formatNumber(data.health.currentHeartRate)}</strong><span>recent bpm</span></div>}
             {hasValue(data.health.restingHeartRate) && <TinyStat label="At rest" value={formatNumber(data.health.restingHeartRate)} unit=" bpm" />}
             {hasValue(data.health.heartRateMin) && <TinyStat label="Range" value={`${formatNumber(data.health.heartRateMin)}–${formatNumber(data.health.heartRateMax)}`} unit=" bpm" />}
+            {maxHeartRate.bpm !== null && <TinyStat label={maxHeartRate.isTodayOnly ? 'Max HR (today only)' : 'Max HR'} value={formatNumber(maxHeartRate.bpm)} unit=" bpm" />}
           </div>
           {heartValues.length > 0 && (
             <LineChart
@@ -681,6 +772,31 @@ export function HealthView({ data }: ViewProps) {
             />
           )}
         </Panel>
+      )}
+
+      {(recovery.value !== null || healthMonitor.metrics.length > 0) && (
+        <div className="health-grid derived-scores-grid">
+          {recovery.value !== null && (
+            <section>
+              <SectionTitle title="Recovery" copy="OpenFit estimate, not a reproduction of any manufacturer's formula." />
+              <Panel className="recovery-card" category="recovery">
+                <div className="recovery-lead">
+                  <RadialProgress value={recovery.value} color={recoveryBandColor[recovery.band ?? 'moderate']} label={recovery.band ?? ''} valueLabel={`${recovery.value}`} size={104} />
+                  <p>Built from HRV, resting heart rate, breathing rate, and last night&rsquo;s Sleep Performance, each compared with your own recent typical range.</p>
+                </div>
+              </Panel>
+            </section>
+          )}
+
+          {healthMonitor.metrics.length > 0 && (
+            <section>
+              <SectionTitle title="Health Monitor" copy="Last night's vitals compared with your own typical range, not a clinical threshold." />
+              <Panel className="health-monitor-panel" category="recovery">
+                {healthMonitor.metrics.map((metric, index) => <div key={metric.key}>{index > 0 && <Separator />}<HealthMonitorRow metric={metric} /></div>)}
+              </Panel>
+            </section>
+          )}
+        </div>
       )}
 
       <div className="health-grid">
@@ -740,6 +856,8 @@ export function SleepView({ data }: ViewProps) {
   const stageTimeline = data.sleep.stageTimeline ?? []
   const stageTransitions = data.sleep.stageTransitions
   const hasSummary = hasValue(data.sleep.totalMinutes) || hasValue(data.sleep.score)
+  const sleepPerformance = computeSleepPerformance(data)
+  const naps = data.sleep.naps
   return (
     <div className="page-stack sleep-page">
       {hasSummary && (
@@ -766,6 +884,15 @@ export function SleepView({ data }: ViewProps) {
             </div>
             <div className="sleep-bullets">
               {hasValue(data.sleep.score) && <BulletChart value={data.sleep.score} max={100} label="Sleep score" valueLabel={`${formatNumber(data.sleep.score)} / 100 · ${sleepScoreCategory(data.sleep.score)}`} color="var(--category-sleep)" />}
+              {sleepPerformance.percent !== null && (
+                <BulletChart
+                  value={sleepPerformance.percent}
+                  max={100}
+                  label="Sleep Performance (estimate)"
+                  valueLabel={`${sleepPerformance.percent}% · ${sleepPerformance.band}`}
+                  color="var(--category-recovery)"
+                />
+              )}
               {hasValue(data.sleep.totalMinutes) && hasValue(data.sleep.goalMinutes) && (
                 <BulletChart
                   value={data.sleep.totalMinutes}
@@ -804,6 +931,13 @@ export function SleepView({ data }: ViewProps) {
             {hasValue(data.sleep.minutesAfterWakeUp) && <TinyStat label="After waking" value={formatMinutes(data.sleep.minutesAfterWakeUp)} />}
             {hasValue(stageTransitions?.wake) && <TinyStat label="Awake episodes" value={formatNumber(stageTransitions.wake)} />}
           </div>
+        </Panel>
+      )}
+
+      {naps.length > 0 && (
+        <Panel className="nap-card" category="sleep">
+          <PanelHeader eyebrow={`${naps.length} nap${naps.length === 1 ? '' : 's'} detected`} title="Naps" icon={SleepIcon} />
+          {naps.map((nap, index) => <div key={nap.id}>{index > 0 && <Separator />}<NapRow nap={nap} /></div>)}
         </Panel>
       )}
 
