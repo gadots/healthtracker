@@ -30,6 +30,14 @@ The renderer is built with React 19, shadcn/Radix, Tailwind CSS v4, assistant-ui
 - Encrypted per-day local archive so past days load instantly without a new network request.
 - Works fully offline in **Demo mode** with no account connected.
 
+**Derived scores**
+- **Recovery (0–100)** — how favorable today's HRV, resting heart rate, breathing rate, and last night's sleep look against your own recent baseline.
+- **Day Strain (0–21)** — cumulative cardiovascular effort for the day, from your intraday heart rate bucketed into personalized zones.
+- **Sleep Performance, Sleep Need, Sleep Debt, Sleep Consistency** — how much sleep you actually got versus a target that adapts to your recent strain and accumulated debt, plus how stable your bed/wake times have been.
+- **Health Monitor** — last night's vitals each flagged as inside or outside *your* typical range, not a generic clinical threshold.
+- **Personalized Max Heart Rate** and **daily heart-rate zones**, refined automatically as more days accumulate.
+- These are OpenFit's own documented estimates — not a reproduction of any manufacturer's proprietary algorithm, and not medical measurements. Each is hidden rather than guessed when there isn't enough data behind it. Formulas and inputs: [docs/DERIVED_SCORES.md](docs/DERIVED_SCORES.md).
+
 **Health providers**
 - **Google Health API v4** as the default, recommended provider.
 - **Legacy Fitbit Web API** kept as a transitional adapter for accounts not yet migrated (Google is deprecating it in September 2026).
@@ -259,6 +267,8 @@ electron/
 src/
   components/                 Views, charts, and assistant-ui chat
   data/                       Demo data and provider-independent normalization
+  lib/scores.ts               Derived scores (Recovery, Strain, Sleep Need/Debt…)
+  lib/home-analysis.ts        Personal-baseline comparisons and daily headline
   lib/                        Formatting and pure utilities
   App.tsx                     UI, connection-state, and Settings orchestration
   types.ts                    Shared renderer/preload contracts
@@ -266,6 +276,7 @@ scripts/
   capture-ui.cjs              Electron visual smoke test
 docs/
   ARCHITECTURE.md             System decisions, security boundaries, audit notes
+  DERIVED_SCORES.md           Formulas, inputs, and availability of each score
   DATA_COVERAGE.md            Data coverage and limitations
   GOOGLE_HEALTH_SETUP.md      Extended OAuth setup guide
   RELEASE.md                  Signing, notarization, and release process

@@ -299,3 +299,161 @@ export function computeRecoveryScore(data: DashboardData, sleepPerformance: Slee
   const value = Math.round(components.reduce((sum, item) => sum + item, 0) / components.length)
   return { value, band: recoveryBand(value), componentCount: components.length }
 }
+
+// --- Sleep Debt, dynamic Sleep Need & Sleep Consistency -------------------
+//
+// These use `data.trends` (the 14-day window already embedded in every
+// sync payload — see google-health-service.cjs's trendStart) rather than
+// the local archive: it is guaranteed present regardless of how many days
+// the user has actually opened, so debt/need stay available even on a
+// fresh install. Sleep Consistency is the one exception — TrendPoint has
+// no startTime/endTime, only the cached archive (DashboardData per day)
+// does, so it genuinely needs `archiveDays`.
+
+const MIN_NIGHTS_FOR_DEBT = 7
+const MIN_NIGHTS_FOR_CONSISTENCY = 4
+const MIN_NIGHTS_FOR_WEEKLY = 5
+const CONSISTENCY_WINDOW_NIGHTS = 7
+const MAX_DEBT_REPAYMENT_MINUTES = 120
+const MIN_SLEEP_NEED_MINUTES = 300
+
+export interface SleepDebtScore {
+  minutes: number | null
+  nightsCounted: number
+}
+
+/**
+ * Cumulative gap between a fixed sleep-need target and actual sleep over
+ * the trailing nights (including last night), floored at 0 per night so a
+ * long sleep doesn't create negative "debt". Needs at least
+ * MIN_NIGHTS_FOR_DEBT nights with a recorded duration.
+ */
+export function computeSleepDebt(data: DashboardData, neededMinutes: number = data.sleep.goalMinutes ?? DEFAULT_SLEEP_NEED_MINUTES, lookback = 14): SleepDebtScore {
+  const nights = data.trends
+    .filter((point) => point.date <= data.selectedDate)
+    .slice(-lookback)
+    .map((point) => point.sleepMinutes)
+    .filter((minutes): minutes is number => minutes !== null && Number.isFinite(minutes))
+
+  if (nights.length < MIN_NIGHTS_FOR_DEBT) return { minutes: null, nightsCounted: nights.length }
+  const minutes = Math.round(nights.reduce((sum, actual) => sum + Math.max(0, neededMinutes - actual), 0))
+  return { minutes, nightsCounted: nights.length }
+}
+
+export interface SleepNeedEstimate {
+  neededMinutes: number | null
+  baselineMinutes: number
+  strainAdjustmentMinutes: number
+  debtAdjustmentMinutes: number
+  napCreditMinutes: number
+}
+
+/**
+ * A personalized nightly sleep target: the user's own goal (or a default)
+ * as a baseline, nudged up by today's Day Strain (harder days ask for more
+ * recovery) and by a portion of any accumulated Sleep Debt (repaid over a
+ * few nights rather than all at once), then reduced by naps already taken
+ * today. Returns `neededMinutes: null` — deferring to the static goal —
+ * until there is enough debt history (MIN_NIGHTS_FOR_DEBT) to make the
+ * adjustment meaningful.
+ */
+export function computeSleepNeed(data: DashboardData, strain: DayStrainScore, debt: SleepDebtScore): SleepNeedEstimate {
+  const baselineMinutes = data.sleep.goalMinutes ?? DEFAULT_SLEEP_NEED_MINUTES
+  const strainAdjustmentMinutes = strain.value !== null ? Math.round(Math.max(0, strain.value - 8) * 4) : 0
+  const debtAdjustmentMinutes = debt.minutes !== null ? Math.round(Math.min(debt.minutes, MAX_DEBT_REPAYMENT_MINUTES) / 3) : 0
+  const napCreditMinutes = data.sleep.naps.reduce((sum, nap) => sum + Math.max(0, nap.durationMinutes), 0)
+
+  if (debt.minutes === null) {
+    return { neededMinutes: null, baselineMinutes, strainAdjustmentMinutes, debtAdjustmentMinutes: 0, napCreditMinutes }
+  }
+  const neededMinutes = Math.max(MIN_SLEEP_NEED_MINUTES, baselineMinutes + strainAdjustmentMinutes + debtAdjustmentMinutes - napCreditMinutes)
+  return { neededMinutes: Math.round(neededMinutes), baselineMinutes, strainAdjustmentMinutes, debtAdjustmentMinutes, napCreditMinutes }
+}
+
+/**
+ * Sleep Performance against the dynamic Sleep Need instead of the static
+ * goal — the function views should call once enough history exists;
+ * `computeSleepPerformance` alone (static goal) remains available as the
+ * fallback it degrades to automatically when debt history is thin.
+ */
+export function computeDynamicSleepPerformance(data: DashboardData, archiveDays: DashboardData[]): SleepPerformanceScore {
+  const strain = computeDayStrain(data, archiveDays)
+  const debt = computeSleepDebt(data)
+  const need = computeSleepNeed(data, strain, debt)
+  const neededMinutes = need.neededMinutes ?? data.sleep.goalMinutes ?? DEFAULT_SLEEP_NEED_MINUTES
+  return computeSleepPerformance(data, neededMinutes)
+}
+
+/**
+ * Clock time in minutes, shifted so late-evening and early-morning times
+ * (bedtimes and wake times) cluster together instead of wrapping around
+ * midnight — a 23:42 bedtime (1422) and a 00:15 one (15 -> 1455) end up
+ * close together instead of ~24h apart.
+ */
+function clockMinutesForConsistency(iso: string): number | null {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return null
+  const minutes = date.getHours() * 60 + date.getMinutes()
+  return minutes < 12 * 60 ? minutes + 24 * 60 : minutes
+}
+
+function consistencyScoreFromStddev(times: number[]): number | null {
+  if (times.length < MIN_NIGHTS_FOR_CONSISTENCY) return null
+  const average = times.reduce((sum, value) => sum + value, 0) / times.length
+  const variance = times.reduce((sum, value) => sum + (value - average) ** 2, 0) / times.length
+  const spreadMinutes = Math.sqrt(variance)
+  // 0 minutes of spread -> 100, 2 hours (120 min) or more -> 0.
+  return Math.max(0, Math.min(100, Math.round(100 - spreadMinutes / 120 * 100)))
+}
+
+export interface SleepConsistencyScore {
+  percent: number | null
+  nightsCounted: number
+}
+
+/**
+ * How stable bed/wake times have been over the last week, averaging a
+ * bedtime-stability score and a wake-time-stability score. Needs
+ * MIN_NIGHTS_FOR_CONSISTENCY archived nights with both timestamps.
+ */
+export function computeSleepConsistency(data: DashboardData, archiveDays: DashboardData[]): SleepConsistencyScore {
+  const nights = mergedDayHistory(data, archiveDays).slice(-CONSISTENCY_WINDOW_NIGHTS)
+  const bedTimes = nights.map((night) => night.sleep.startTime ? clockMinutesForConsistency(night.sleep.startTime) : null)
+    .filter((value): value is number => value !== null)
+  const wakeTimes = nights.map((night) => night.sleep.endTime ? clockMinutesForConsistency(night.sleep.endTime) : null)
+    .filter((value): value is number => value !== null)
+
+  const bedScore = consistencyScoreFromStddev(bedTimes)
+  const wakeScore = consistencyScoreFromStddev(wakeTimes)
+  const components = [bedScore, wakeScore].filter((value): value is number => value !== null)
+  const nightsCounted = Math.min(bedTimes.length, wakeTimes.length)
+  if (!components.length) return { percent: null, nightsCounted }
+  const percent = Math.round(components.reduce((sum, value) => sum + value, 0) / components.length)
+  return { percent, nightsCounted }
+}
+
+export interface WeeklyAssessment {
+  averageSleepPerformance: number | null
+  consistency: number | null
+  nightsCounted: number
+}
+
+/**
+ * A weekly rollup pairing average Sleep Performance with Sleep
+ * Consistency, mirroring how Sleep Performance itself is scored for each
+ * archived night. Needs MIN_NIGHTS_FOR_WEEKLY nights with a performance
+ * value.
+ */
+export function computeWeeklyAssessment(data: DashboardData, archiveDays: DashboardData[]): WeeklyAssessment {
+  const nights = mergedDayHistory(data, archiveDays).slice(-CONSISTENCY_WINDOW_NIGHTS)
+  const consistency = computeSleepConsistency(data, archiveDays)
+  const performances = nights
+    .map((night) => computeSleepPerformance(night).percent)
+    .filter((value): value is number => value !== null)
+
+  if (performances.length < MIN_NIGHTS_FOR_WEEKLY) {
+    return { averageSleepPerformance: null, consistency: consistency.percent, nightsCounted: performances.length }
+  }
+  const averageSleepPerformance = Math.round(performances.reduce((sum, value) => sum + value, 0) / performances.length)
+  return { averageSleepPerformance, consistency: consistency.percent, nightsCounted: performances.length }
+}

@@ -47,8 +47,12 @@ import {
   buildHealthMonitor,
   computeDailyHeartRateZones,
   computeDayStrain,
+  computeDynamicSleepPerformance,
   computeRecoveryScore,
-  computeSleepPerformance,
+  computeSleepConsistency,
+  computeSleepDebt,
+  computeSleepNeed,
+  computeWeeklyAssessment,
   estimateMaxHeartRate,
 } from '@/lib/scores'
 import type { HealthMonitorMetric, RangeFlag } from '@/lib/scores'
@@ -417,9 +421,9 @@ function VitalSnapshot({
   )
 }
 
-export function TodayView({ data, navigate }: ViewProps) {
+export function TodayView({ data, navigate, archiveDays }: ViewProps) {
   const analysis = analyzeHome(data)
-  const sleepPerformance = computeSleepPerformance(data)
+  const sleepPerformance = computeDynamicSleepPerformance(data, archiveDays)
   const recovery = computeRecoveryScore(data, sleepPerformance)
   const stepsByHour = hourlyBuckets(data.activity.stepsIntraday)
   const steps = hasValue(data.activity.steps) ? data.activity.steps : null
@@ -727,7 +731,7 @@ export function HealthView({ data, archiveDays }: ViewProps) {
   const signals = overnightSignals(data)
   const maxHeartRate = estimateMaxHeartRate(data, archiveDays)
   const healthMonitor = buildHealthMonitor(data)
-  const sleepPerformance = computeSleepPerformance(data)
+  const sleepPerformance = computeDynamicSleepPerformance(data, archiveDays)
   const recovery = computeRecoveryScore(data, sleepPerformance)
   const secondary = presentSignals([
     hasValue(data.health.cardioScore) ? { label: 'Cardio fitness', value: formatNumber(data.health.cardioScore), note: 'Latest score', icon: GaugeIcon } : null,
@@ -848,7 +852,7 @@ export function HealthView({ data, archiveDays }: ViewProps) {
   )
 }
 
-export function SleepView({ data }: ViewProps) {
+export function SleepView({ data, archiveDays }: ViewProps) {
   const sleepValues = data.trends.map((point) => point.sleepMinutes)
   const sleepCount = sleepValues.filter(hasValue).length
   const efficiencyValues = data.trends.map((point) => point.sleepEfficiency)
@@ -856,7 +860,12 @@ export function SleepView({ data }: ViewProps) {
   const stageTimeline = data.sleep.stageTimeline ?? []
   const stageTransitions = data.sleep.stageTransitions
   const hasSummary = hasValue(data.sleep.totalMinutes) || hasValue(data.sleep.score)
-  const sleepPerformance = computeSleepPerformance(data)
+  const strain = computeDayStrain(data, archiveDays)
+  const debt = computeSleepDebt(data)
+  const need = computeSleepNeed(data, strain, debt)
+  const sleepPerformance = computeDynamicSleepPerformance(data, archiveDays)
+  const consistency = computeSleepConsistency(data, archiveDays)
+  const weekly = computeWeeklyAssessment(data, archiveDays)
   const naps = data.sleep.naps
   return (
     <div className="page-stack sleep-page">
@@ -939,6 +948,28 @@ export function SleepView({ data }: ViewProps) {
           <PanelHeader eyebrow={`${naps.length} nap${naps.length === 1 ? '' : 's'} detected`} title="Naps" icon={SleepIcon} />
           {naps.map((nap, index) => <div key={nap.id}>{index > 0 && <Separator />}<NapRow nap={nap} /></div>)}
         </Panel>
+      )}
+
+      {(need.neededMinutes !== null || debt.minutes !== null || consistency.percent !== null || weekly.averageSleepPerformance !== null) && (
+        <section>
+          <SectionTitle title="Sleep Need &amp; Consistency" copy="OpenFit estimates built from your recent nights, not a reproduction of any manufacturer's formula." />
+          <Panel className="sleep-recovery-card" category="sleep">
+            <div className="compact-stats">
+              {need.neededMinutes !== null && (
+                <TinyStat label="Tonight's Sleep Need (estimate)" value={compactMinutes(need.neededMinutes)} />
+              )}
+              {debt.minutes !== null && (
+                <TinyStat label={`Sleep Debt (last ${debt.nightsCounted} nights)`} value={formatMinutes(debt.minutes)} />
+              )}
+              {consistency.percent !== null && (
+                <TinyStat label="Sleep Consistency" value={`${consistency.percent}%`} unit={` · ${sleepScoreCategory(consistency.percent)}`} />
+              )}
+              {weekly.averageSleepPerformance !== null && (
+                <TinyStat label="Weekly Sleep Performance" value={`${weekly.averageSleepPerformance}%`} />
+              )}
+            </div>
+          </Panel>
+        </section>
       )}
 
       {(sleepCount > 1 || efficiencyCount > 1) && (

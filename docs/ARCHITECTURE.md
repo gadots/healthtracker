@@ -116,6 +116,19 @@ syncData(accessToken, date, onProgress)
 
 The main process selects the adapter from `config.provider`. The UI always receives the same `RawFitbitPayload` contract, then `normalizeFitbitData` converts it into `DashboardData`.
 
+## Derived Scores
+
+On top of the normalized raw measurements, `src/lib/scores.ts` computes a small set of OpenFit-original composite estimates — Recovery, Day Strain, Sleep Performance, Sleep Need/Debt/Consistency, a personalized Max Heart Rate, daily heart-rate zones, and a Health Monitor panel that flags last night's vitals against the user's own typical range.
+
+Design rules, all enforced in that one module:
+
+- **Renderer-side pure functions.** Same convention as `src/lib/home-analysis.ts`: no network, no IPC, no side effects, unit tested against `createDemoData()` fixtures in `src/lib/scores.test.ts`. Nothing new was added to the Electron main process or the preload bridge for this.
+- **Two history sources, used deliberately.** `data.trends` (the 14-day window embedded in every sync payload) backs the baseline comparisons and sleep debt so they work on a fresh install; the locally cached encrypted archive (`archiveDays`, loaded once in `src/App.tsx` via the shared `normalizeHealthArchive` helper and threaded into views) is used only where `TrendPoint` genuinely lacks the field — max heart rate, intraday zones/strain, and sleep start/end times.
+- **Hidden, never guessed.** Every score has a minimum-sample-size gate and returns `null` below it, which the views and the assistant context both treat as "omit this card/field" — matching OpenFit's existing "no empty cards" principle.
+- **Not a manufacturer's algorithm.** These are documented, deliberately simple OpenFit formulas over signals Google Health already provides, carrying an explicit estimate label in the UI and a disclaimer in the assistant context. `docs/DERIVED_SCORES.md` documents each formula, its inputs, and its availability gate; `docs/HOME_DASHBOARD_MODEL.md` records why the original "no composite score" rule was amended to allow them.
+
+The scores also flow into the AI assistant automatically: `buildHealthAssistantContext` includes them under `derivedScores`, so Claude or Codex can explain them from the same numbers the UI shows without any assistant-side changes.
+
 ## Resilience
 
 - API reads are independent. A 403 or 404 response for ECG or temperature does not cancel steps and sleep.

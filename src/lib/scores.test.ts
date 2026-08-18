@@ -5,14 +5,27 @@ import {
   buildHealthMonitor,
   computeDailyHeartRateZones,
   computeDayStrain,
+  computeDynamicSleepPerformance,
   computeRecoveryScore,
+  computeSleepConsistency,
+  computeSleepDebt,
+  computeSleepNeed,
   computeSleepPerformance,
+  computeWeeklyAssessment,
   estimateMaxHeartRate,
   mergedDayHistory,
 } from './scores'
 
 function withHeartRateMax(data: DashboardData, heartRateMax: number | null): DashboardData {
   return { ...data, health: { ...data.health, heartRateMax } }
+}
+
+function withSleepTimes(data: DashboardData, startTime: string, endTime: string): DashboardData {
+  return { ...data, sleep: { ...data.sleep, startTime, endTime } }
+}
+
+function archiveWithSleepTimes(dates: string[], bedClock: string, wakeClock: string): DashboardData[] {
+  return dates.map((date) => withSleepTimes(createDemoData(date), `${date}T${bedClock}:00`, `${date}T${wakeClock}:00`))
 }
 
 function flatHeartSeries(value: number, count: number, stepMinutes: number): TimePoint[] {
@@ -181,5 +194,126 @@ describe('computeRecoveryScore', () => {
     expect(recovery.value!).toBeGreaterThanOrEqual(0)
     expect(recovery.value!).toBeLessThanOrEqual(100)
     expect(['low', 'moderate', 'high']).toContain(recovery.band)
+  })
+})
+
+describe('computeSleepDebt', () => {
+  it('is null with fewer than 7 nights of trend data', () => {
+    const data = createDemoData('2026-06-22')
+    const thin: DashboardData = { ...data, trends: data.trends.slice(-3) }
+    expect(computeSleepDebt(thin).minutes).toBeNull()
+  })
+
+  it('sums the shortfall against the need across the trailing nights', () => {
+    const data = createDemoData('2026-06-22')
+    const nights = data.trends.slice(-7).map((point) => ({ ...point, sleepMinutes: 400 }))
+    const data7: DashboardData = { ...data, trends: [...data.trends.slice(0, -7), ...nights] }
+
+    const debt = computeSleepDebt(data7, 480, 7)
+    expect(debt.nightsCounted).toBe(7)
+    expect(debt.minutes).toBe(7 * 80)
+  })
+
+  it('never counts a well-rested night as negative debt', () => {
+    const data = createDemoData('2026-06-22')
+    const nights = data.trends.slice(-7).map((point) => ({ ...point, sleepMinutes: 600 }))
+    const data7: DashboardData = { ...data, trends: [...data.trends.slice(0, -7), ...nights] }
+
+    expect(computeSleepDebt(data7, 480, 7).minutes).toBe(0)
+  })
+})
+
+describe('computeSleepNeed', () => {
+  it('defers to the static goal (returns null) without enough debt history', () => {
+    const data = createDemoData('2026-06-22')
+    const thin: DashboardData = { ...data, trends: data.trends.slice(-3) }
+    const strain = computeDayStrain(thin, [])
+    const debt = computeSleepDebt(thin)
+
+    const need = computeSleepNeed(thin, strain, debt)
+    expect(need.neededMinutes).toBeNull()
+  })
+
+  it('raises the need above baseline after real debt and high strain, and credits naps', () => {
+    const data = createDemoData('2026-06-22')
+    const shortNights = data.trends.slice(-7).map((point) => ({ ...point, sleepMinutes: 350 }))
+    const strained: DashboardData = {
+      ...data,
+      sleep: { ...data.sleep, goalMinutes: 480, naps: [{ id: 'n', date: data.selectedDate, startTime: 't', endTime: 't', durationMinutes: 20 }] },
+      trends: [...data.trends.slice(0, -7), ...shortNights],
+    }
+    const strain = { value: 18, band: 'all-out' as const, zones: { light: 0, moderate: 0, vigorous: 0, peak: 200 } }
+    const debt = computeSleepDebt(strained)
+
+    const need = computeSleepNeed(strained, strain, debt)
+    expect(need.neededMinutes).not.toBeNull()
+    expect(need.neededMinutes!).toBeGreaterThan(480)
+    expect(need.napCreditMinutes).toBe(20)
+  })
+})
+
+describe('computeDynamicSleepPerformance', () => {
+  it('falls back to the static goal when there is not enough debt history', () => {
+    const data = createDemoData('2026-06-22')
+    const thin: DashboardData = { ...data, trends: data.trends.slice(-3), sleep: { ...data.sleep, totalMinutes: 460, goalMinutes: 480 } }
+
+    const dynamic = computeDynamicSleepPerformance(thin, [])
+    const staticResult = computeSleepPerformance(thin)
+    expect(dynamic.percent).toBe(staticResult.percent)
+  })
+})
+
+describe('computeSleepConsistency', () => {
+  it('is null with fewer than 4 nights of bed/wake data', () => {
+    const data = createDemoData('2026-06-22')
+    const archive = archiveWithSleepTimes(['2026-06-19', '2026-06-20'], '23:00', '07:00')
+    expect(computeSleepConsistency(data, archive).percent).toBeNull()
+  })
+
+  it('scores identical bed/wake times as fully consistent', () => {
+    const dates = ['2026-06-18', '2026-06-19', '2026-06-20', '2026-06-21']
+    const archive = archiveWithSleepTimes(dates, '23:00', '07:00')
+    const data = withSleepTimes(createDemoData('2026-06-22'), '2026-06-22T23:00:00', '2026-06-23T07:00:00')
+
+    const consistency = computeSleepConsistency(data, archive)
+    expect(consistency.percent).toBe(100)
+  })
+
+  it('scores erratic bed times lower than consistent ones', () => {
+    const dates = ['2026-06-18', '2026-06-19', '2026-06-20', '2026-06-21']
+    const steadyArchive = archiveWithSleepTimes(dates, '23:00', '07:00')
+    const erraticArchive = [
+      withSleepTimes(createDemoData('2026-06-18'), '2026-06-18T21:30:00', '2026-06-19T05:30:00'),
+      withSleepTimes(createDemoData('2026-06-19'), '2026-06-19T23:50:00', '2026-06-20T08:10:00'),
+      withSleepTimes(createDemoData('2026-06-20'), '2026-06-21T01:20:00', '2026-06-21T09:00:00'),
+      withSleepTimes(createDemoData('2026-06-21'), '2026-06-21T22:15:00', '2026-06-22T06:05:00'),
+    ]
+    const data = withSleepTimes(createDemoData('2026-06-22'), '2026-06-22T23:00:00', '2026-06-23T07:00:00')
+
+    const steady = computeSleepConsistency(data, steadyArchive)
+    const erratic = computeSleepConsistency(data, erraticArchive)
+    expect(steady.percent).not.toBeNull()
+    expect(erratic.percent).not.toBeNull()
+    expect(erratic.percent!).toBeLessThan(steady.percent!)
+  })
+})
+
+describe('computeWeeklyAssessment', () => {
+  it('is null (averageSleepPerformance) with fewer than 5 nights', () => {
+    const data = createDemoData('2026-06-22')
+    expect(computeWeeklyAssessment(data, []).averageSleepPerformance).toBeNull()
+  })
+
+  it('averages sleep performance across the week once enough nights exist', () => {
+    const dates = ['2026-06-17', '2026-06-18', '2026-06-19', '2026-06-20', '2026-06-21']
+    const archive = dates.map((date) => {
+      const day = createDemoData(date)
+      return { ...day, sleep: { ...day.sleep, totalMinutes: 480, goalMinutes: 480 } }
+    })
+    const data = createDemoData('2026-06-22')
+
+    const weekly = computeWeeklyAssessment(data, archive)
+    expect(weekly.averageSleepPerformance).not.toBeNull()
+    expect(weekly.nightsCounted).toBeGreaterThanOrEqual(5)
   })
 })

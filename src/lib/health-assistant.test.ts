@@ -20,6 +20,28 @@ describe('health assistant context', () => {
     expect(context.selectedDayDetail.summary).toHaveProperty('body')
     expect(context.selectedDayDetail.intraday.heartRate.length).toBeGreaterThan(0)
   })
+
+  it('exposes the derived scores with their disclaimer so the assistant can explain them', () => {
+    const data = createDemoData('2026-06-23')
+    const context = JSON.parse(buildHealthAssistantContext(data, [data], 'today'))
+
+    expect(context.derivedScores.disclaimer).toContain('not a reproduction')
+    expect(context.derivedScores.recovery.value).toBeGreaterThanOrEqual(0)
+    expect(context.derivedScores.sleepPerformancePercent).toBeGreaterThan(0)
+    expect(context.derivedScores.naps.length).toBeGreaterThan(0)
+  })
+
+  it('omits derived scores that do not have enough history instead of inventing them', () => {
+    const data = createDemoData('2026-06-23')
+    // A single trend point leaves every personal-baseline comparison and the
+    // debt window short of their minimum sample counts.
+    const thin = { ...data, trends: data.trends.slice(-1) }
+    const context = JSON.parse(buildHealthAssistantContext(thin, [], 'today'))
+
+    expect(context.derivedScores.recovery.value ?? null).toBeNull()
+    expect(context.derivedScores.sleepDebtMinutes ?? null).toBeNull()
+    expect(context.derivedScores.sleepNeedMinutes ?? null).toBeNull()
+  })
 })
 
 describe('assistant navigation directives', () => {
