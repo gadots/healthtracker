@@ -11,7 +11,6 @@ import {
   type ThreadMessage,
 } from '@assistant-ui/react'
 import { ArrowDown, ArrowLeftRight, ArrowUp, Plus, Sparkles, Square, TriangleAlert, X } from 'lucide-react'
-import { normalizeHealthArchive } from '@/data/normalize'
 import {
   buildHealthAssistantContext,
   parseAssistantNavigation,
@@ -120,16 +119,20 @@ export function HealthAssistant({
   open,
   data,
   page,
+  archiveDays,
   onOpenChange,
   onNavigate,
 }: {
   open: boolean
   data: DashboardData
   page: PageId
+  /** Same history the dashboard renders, so the assistant and the UI can never disagree (demo mode included). */
+  archiveDays: DashboardData[]
   onOpenChange: (open: boolean) => void
   onNavigate: (navigation: AssistantNavigation) => void
 }) {
   const dataRef = useRef(data)
+  const archiveRef = useRef(archiveDays)
   const pageRef = useRef(page)
   const navigateRef = useRef(onNavigate)
   const [status, setStatus] = useState(unavailableStatus)
@@ -139,6 +142,7 @@ export function HealthAssistant({
   const activeProviderRef = useRef(status.activeProvider)
 
   useEffect(() => { dataRef.current = data }, [data])
+  useEffect(() => { archiveRef.current = archiveDays }, [archiveDays])
   useEffect(() => { pageRef.current = page }, [page])
   useEffect(() => { navigateRef.current = onNavigate }, [onNavigate])
   useEffect(() => { activeProviderRef.current = status.activeProvider }, [status.activeProvider])
@@ -187,16 +191,7 @@ export function HealthAssistant({
       const prompt = messageText(messages.at(-1))
       if (!prompt) throw new Error('Write a question before sending it.')
 
-      let archived: DashboardData[] = []
-      if (window.fitbit && dataRef.current.source !== 'demo') {
-        try {
-          archived = normalizeHealthArchive(await window.fitbit.getCachedArchive())
-        } catch {
-          archived = []
-        }
-      }
-
-      const healthContext = buildHealthAssistantContext(dataRef.current, archived, pageRef.current)
+      const healthContext = buildHealthAssistantContext(dataRef.current, archiveRef.current, pageRef.current)
       const requestId = crypto.randomUUID()
       const queue = createQueue()
       let fullText = ''

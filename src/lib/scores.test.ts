@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createDemoData } from '@/data/demo'
+import { createDemoArchive, createDemoData } from '@/data/demo'
 import type { DashboardData, TimePoint } from '@/types'
 import {
   buildHealthMonitor,
@@ -315,5 +315,51 @@ describe('computeWeeklyAssessment', () => {
     const weekly = computeWeeklyAssessment(data, archive)
     expect(weekly.averageSleepPerformance).not.toBeNull()
     expect(weekly.nightsCounted).toBeGreaterThanOrEqual(5)
+  })
+})
+
+// The reported bug: with an empty archive these scores silently vanished, so
+// demo mode could not be used to verify them. Demo now ships a real 14-day
+// archive and every derived score must survive on it.
+describe('demo mode surfaces every derived score', () => {
+  const DATES = ['2026-06-22', '2026-01-05', '2025-11-02', '2026-12-31']
+
+  it.each(DATES)('produces every score on %s', (date) => {
+    const data = createDemoData(date)
+    const archive = createDemoArchive(date)
+
+    const consistency = computeSleepConsistency(data, archive)
+    expect(consistency.percent).not.toBeNull()
+    // A band, not a constant: pinning a number would make the test a change
+    // detector, and a perfect 100 would mean the demo nights went flat again.
+    expect(consistency.percent!).toBeGreaterThan(40)
+    expect(consistency.percent!).toBeLessThan(100)
+
+    const weekly = computeWeeklyAssessment(data, archive)
+    expect(weekly.averageSleepPerformance).not.toBeNull()
+    expect(weekly.nightsCounted).toBeGreaterThanOrEqual(5)
+
+    const maxHeartRate = estimateMaxHeartRate(data, archive)
+    expect(maxHeartRate.isTodayOnly).toBe(false)
+    expect(maxHeartRate.bpm).toBeGreaterThanOrEqual(data.health.heartRateMax!)
+
+    expect(computeDayStrain(data, archive).value).not.toBeNull()
+    expect(computeDailyHeartRateZones(data, archive)).not.toBeNull()
+    expect(computeSleepDebt(data).minutes).not.toBeNull()
+    expect(computeSleepNeed(data, computeDayStrain(data, archive), computeSleepDebt(data)).neededMinutes).not.toBeNull()
+
+    const sleepPerformance = computeDynamicSleepPerformance(data, archive)
+    expect(sleepPerformance.percent).not.toBeNull()
+    expect(computeRecoveryScore(data, sleepPerformance).value).not.toBeNull()
+  })
+
+  it('varies day strain across the archive instead of repeating one value', () => {
+    const archive = createDemoArchive('2026-06-22')
+    const strains = archive.map((day) => computeDayStrain(day, archive).value)
+
+    expect(strains.every((value) => value !== null)).toBe(true)
+    // Guards against a flat generator, which is what made the scores useless.
+    expect(new Set(strains).size).toBeGreaterThanOrEqual(5)
+    expect(Math.max(...strains as number[]) - Math.min(...strains as number[])).toBeGreaterThan(2)
   })
 })

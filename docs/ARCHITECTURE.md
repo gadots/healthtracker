@@ -129,6 +129,16 @@ Design rules, all enforced in that one module:
 
 The scores also flow into the AI assistant automatically: `buildHealthAssistantContext` includes them under `derivedScores`, so Claude or Codex can explain them from the same numbers the UI shows without any assistant-side changes.
 
+## Data Mode (live vs demo)
+
+The dashboard can show either the user's own measurements or locally generated sample data, and always says which.
+
+- **Preference vs provenance.** `DataModePreference` (`'live' | 'demo'`) is what the user chose; `DashboardData.source` stays the honest provenance of the payload on screen. They are kept separate rather than overloading one field: choosing demo makes App render `createDemoData(...)`, whose `source` is already `'demo'`, so every existing `source === 'demo'` check remains correct and the two can never contradict each other. `resolveDataMode` (`src/lib/data-mode.ts`) is the single place that turns preference plus connection state into the label, tone and detail every indicator uses, so the top-bar badge, the sidebar label and the Devices card cannot drift apart.
+- **Forced demo is real.** Demo can be selected *while an account is connected*, to test or demo the app without exposing real data. Three guards keep that honest: `changeDate`, `runSync` and `loadNativeState` in `src/App.tsx` all check the mode (via a ref, since they run from async callbacks) so a forced-demo session never issues a provider request or lets a cached payload overwrite the screen. Export keeps refusing synthetic data; only its wording adapts.
+- **Persistence.** The preference lives in `localStorage` (`src/lib/preferences.ts`), not in the encrypted `safeStorage` store used for OAuth tokens: it is a two-value display preference that reveals nothing, and it must work in the plain browser dev server where the IPC bridge does not exist. Every access is exception-guarded with an in-memory fallback, because the packaged app loads over `file://`. CSP is unaffected: `default-src 'self'` governs resource fetching, not Web Storage.
+- **Demo archive.** `createDemoArchive` produces the 14 prior days with the same "oldest first" contract as the real encrypted archive, so demo exercises the archive-dependent derived scores exactly as live data does. App selects between the demo and real archive on the *provenance of the rendered payload*, so the day and its history can never briefly disagree while the switch is flipping.
+- **The assistant is told.** The context carries an explicit `dataMode` field and prefixes the derived-scores disclaimer with a synthetic-data warning in demo, so the model cannot present sample numbers as facts about the user's health. `HealthAssistant` now receives the same `archiveDays` the dashboard renders instead of re-reading the archive over IPC, which removes a duplicate read and a source of divergence.
+
 ## Resilience
 
 - API reads are independent. A 403 or 404 response for ECG or temperature does not cancel steps and sleep.

@@ -1,4 +1,3 @@
-import { createDemoData } from './demo'
 import type {
   ActivityItem,
   DashboardData,
@@ -434,11 +433,6 @@ function buildInsights(activity: Json, heart: Json, sleep: Json | null, goals: J
     })
   }
   return insights
-}
-
-export function dataForDate(data: DashboardData, date: string) {
-  if (data.source === 'demo') return createDemoData(date)
-  return { ...data, selectedDate: date }
 }
 
 /**

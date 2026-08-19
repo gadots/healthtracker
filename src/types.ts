@@ -4,6 +4,9 @@ export type DataSource = 'demo' | 'fitbit' | 'google-health' | 'cache'
 
 export type HealthProvider = 'google-health' | 'fitbit-legacy'
 
+/** User's persisted choice of what the dashboard should show. `demo` is honoured even while an account is connected. */
+export type DataModePreference = 'live' | 'demo'
+
 export interface TimePoint {
   time: string
   value: number

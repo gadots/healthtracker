@@ -32,6 +32,17 @@ Two different sources, deliberately:
 - **`data.trends`** — the 14-day window embedded in every sync payload (see `trendStart` in `electron/google-health-service.cjs`). Always present, so baseline comparisons, Sleep Debt, and Sleep Need work even on a fresh install.
 - **`archiveDays`** — the locally cached, encrypted per-day archive (`electron/health-cache.cjs`), normalized by `normalizeHealthArchive` in `src/data/normalize.ts` and loaded in `src/App.tsx`. Only contains days the user has actually synced/opened, so it is used only where `TrendPoint` genuinely lacks the field: Max Heart Rate (needs `heartRateMax`), intraday zones/Strain (needs `heartRateIntraday`), and Sleep Consistency (needs sleep start/end timestamps).
 
+## Verifying them without a connected account
+
+Demo mode ships a full 14-day synthetic archive (`createDemoArchive` in `src/data/demo.ts`), not just a single day, so **every** score above — including the archive-dependent ones (Sleep Consistency, Weekly Assessment, a refined Max Heart Rate) — renders and can be checked without connecting a real account. Demo values are seeded from the calendar date rather than from a day's position in the window, which means:
+
+- the numbers for a given date are identical whether that date is shown as "today", as a trend point, or as an archive entry;
+- bed/wake times, heart-rate series, workout intensity and naps genuinely differ day to day, so Sleep Consistency lands in a believable band instead of a suspicious 100 and Day Strain varies continuously across the archive.
+
+`src/lib/scores.test.ts` encodes this as a regression test (`demo mode surfaces every derived score`): if a future change makes any score disappear in demo mode, or flattens the generated data, that test fails.
+
+Which data you are looking at is always visible in the top bar, and the source can be switched in **Settings -> Data source** (see `docs/ARCHITECTURE.md`).
+
 ## Where they appear
 
 - **Today** — Recovery tile in the Overview grid.

@@ -43,6 +43,8 @@ import {
 import { availableMetricCount, hasActivityData, hasBodyData, hasHealthData, hasSleepData } from '@/lib/data-availability'
 import { analyzeHome } from '@/lib/home-analysis'
 import type { BaselineComparison } from '@/lib/home-analysis'
+import type { DataModeState } from '@/lib/data-mode'
+import { cn } from '@/lib/utils'
 import {
   buildHealthMonitor,
   computeDailyHeartRateZones,
@@ -63,6 +65,8 @@ interface ViewProps {
   navigate: (page: PageId) => void
   /** Prior cached days, oldest first. Powers the multi-day derived scores (Recovery, Strain, Sleep Need/Debt/Consistency). */
   archiveDays: DashboardData[]
+  /** Whether the numbers on screen are live, demo, or a stale local cache. */
+  dataMode: DataModeState
 }
 
 interface Signal {
@@ -1086,7 +1090,7 @@ function CoverageRow({ icon: Icon, label, items }: { icon: AppIcon; label: strin
   )
 }
 
-export function DevicesView({ data, status }: ViewProps) {
+export function DevicesView({ data, status, dataMode }: ViewProps) {
   const movement = [
     hasValue(data.activity.steps) && 'steps',
     data.activity.stepsIntraday.length > 0 && 'steps per hour',
@@ -1108,7 +1112,6 @@ export function DevicesView({ data, status }: ViewProps) {
     hasValue(data.body.caloriesIn) && 'nutrition',
   ].filter((item): item is string => Boolean(item))
   const isDemo = data.source === 'demo'
-  const isConnected = status.connected || isDemo
   const sourceName = isDemo ? 'Sample data' : status.provider === 'fitbit-legacy' ? 'Fitbit legacy' : 'Google Health'
   const deviceName = data.device?.name ?? (isDemo ? 'Google Fitbit Air' : sourceName)
 
@@ -1121,9 +1124,12 @@ export function DevicesView({ data, status }: ViewProps) {
               <img src="/fitbit-air.png" alt="Google Fitbit Air in Obsidian" />
             </div>
             <div className="device-copy">
-              <Badge variant="secondary" className={`connection-badge ${isConnected ? 'is-connected' : ''}`}><span className={`status-dot ${isConnected ? 'online' : ''}`} /> {isConnected ? 'Connected' : 'Not connected'}</Badge>
+              <Badge variant="secondary" className={cn('connection-badge', `is-${dataMode.tone}`, dataMode.tone === 'live' && 'is-connected')}>
+                <span className={cn('status-dot', dataMode.tone === 'live' && 'online')} /> {dataMode.label}
+              </Badge>
               <h2>{deviceName}</h2>
               <p>{data.device?.type ?? sourceName}{data.device?.firmware && !isDemo ? ` · firmware ${data.device.firmware}` : ''}</p>
+              <p className="device-mode-detail">{dataMode.detail}</p>
               <div className="device-facts">
                 {hasValue(data.device?.batteryLevel ?? null) && <span><BatteryIcon /> {formatNumber(data.device?.batteryLevel ?? null)}%</span>}
                 {data.device?.lastSyncTime && <span><CloudIcon /> Updated {relativeTime(data.device.lastSyncTime)}</span>}

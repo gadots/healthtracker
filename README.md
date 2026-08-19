@@ -28,7 +28,8 @@ The renderer is built with React 19, shadcn/Radix, Tailwind CSS v4, assistant-ui
 - Adaptive views (Today, Activity, Health, Sleep, Body, Devices) that only show sections with real data — no empty cards.
 - Steps, calories, distance, floors, active/zone/sedentary minutes, heart rate, HRV, breathing rate, SpO2, skin and core temperature, VO2 max/cardio score, ECG classification, irregular-rhythm alerts, blood glucose, sleep stages and timeline, weight, body fat, hydration, and nutrition — whatever your device and consent actually provide.
 - Encrypted per-day local archive so past days load instantly without a new network request.
-- Works fully offline in **Demo mode** with no account connected.
+- **Live / Demo switch** in Settings with an always-visible indicator in the top bar, so you always know whether you are looking at your own measurements or sample data. Demo can be selected even while your account stays connected: live sync simply pauses, and exports stay disabled so sample data can never be mistaken for real measurements.
+- Demo mode ships a full 14-day synthetic history, so **every** metric and derived score is visible and verifiable without connecting an account.
 
 **Derived scores**
 - **Recovery (0–100)** — how favorable today's HRV, resting heart rate, breathing rate, and last night's sleep look against your own recent baseline.
@@ -268,6 +269,8 @@ src/
   components/                 Views, charts, and assistant-ui chat
   data/                       Demo data and provider-independent normalization
   lib/scores.ts               Derived scores (Recovery, Strain, Sleep Need/Debt…)
+  lib/data-mode.ts            Resolves live vs demo into one labelled state
+  lib/preferences.ts          Persists the live/demo choice
   lib/home-analysis.ts        Personal-baseline comparisons and daily headline
   lib/                        Formatting and pure utilities
   App.tsx                     UI, connection-state, and Settings orchestration

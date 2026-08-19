@@ -68,7 +68,9 @@ export function estimateMaxHeartRate(data: DashboardData, archiveDays: Dashboard
     bpm: best?.bpm ?? null,
     observedAt: best?.date ?? null,
     sampleDays,
-    isTodayOnly: archiveDays.length === 0,
+    // Based on how many days actually contributed a reading, not on whether an
+    // archive exists: an archive of days without heartRateMax is still "today only".
+    isTodayOnly: sampleDays <= 1,
   }
 }
 

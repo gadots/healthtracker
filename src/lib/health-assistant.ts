@@ -193,8 +193,9 @@ export function buildHealthAssistantContext(
   const maxHeartRate = estimateMaxHeartRate(current, archiveDays)
   const healthMonitor = buildHealthMonitor(current)
 
+  const isDemo = current.source === 'demo'
   const derived = withoutNulls({
-    disclaimer: 'OpenFit-original estimates from the raw measurements above, not a reproduction of any manufacturer\'s proprietary algorithm and not a medical device.',
+    disclaimer: `${isDemo ? 'WARNING: this context contains synthetic demo data, not the user\'s real measurements — never present these numbers as facts about their health. ' : ''}OpenFit-original estimates from the raw measurements above, not a reproduction of any manufacturer\'s proprietary algorithm and not a medical device.`,
     recovery: { value: recovery.value, band: recovery.band },
     dayStrain: { value: strain.value, band: strain.band, heartRateZoneMinutes: strain.value === null ? null : strain.zones },
     maxHeartRateBpm: { value: maxHeartRate.bpm, isTodayOnly: maxHeartRate.isTodayOnly },
@@ -211,6 +212,9 @@ export function buildHealthAssistantContext(
     schema: 'openfit-health-context/v1',
     generatedAt: new Date().toISOString(),
     source: current.source,
+    // Explicit alongside `source` so the model cannot miss that the numbers
+    // are synthetic; a bare enum is easy to overlook.
+    dataMode: isDemo ? 'demo' : 'live',
     app: {
       currentPage: page,
       selectedDate: current.selectedDate,

@@ -338,7 +338,6 @@ input:focus-visible,
 .topbar-heading > div:last-child { min-width: 0; }
 .topbar-heading h1 { margin: 0; overflow: hidden; color: var(--color-snow); font-size: clamp(17px, 2vw, 20px); font-weight: 590; letter-spacing: -0.01em; text-overflow: ellipsis; white-space: nowrap; }
 .topbar-heading p { margin: 3px 0 0; color: var(--color-slate); font-size: 13px; text-transform: capitalize; }
-.source-context { display: inline-flex; align-items: center; gap: 7px; color: var(--color-fog); font-size: 13px; font-weight: 510; }
 .mobile-menu { display: none !important; }
 
 .topbar-actions { display: flex; flex-shrink: 0; align-items: center; gap: 6px; }
@@ -392,23 +391,6 @@ input:focus-visible,
 
 .profile-button [data-slot="avatar"] { width: 30px; height: 30px; }
 .profile-button svg { width: 15px; height: 15px; }
-
-.demo-banner {
-  display: flex;
-  max-width: 1160px;
-  align-items: center;
-  gap: 8px;
-  padding: 9px 12px;
-  margin: 16px auto 0;
-  border: 1px solid var(--color-graphite);
-  border-radius: 6px;
-  color: var(--color-mist);
-  background: transparent;
-  font-size: 13px;
-}
-
-.demo-banner svg { width: 14px; height: 14px; color: var(--color-indigo); }
-.demo-banner button { padding: 0; margin-left: auto; border: 0; color: var(--color-indigo); background: transparent; font-size: 13px; }
 
 .page-content {
   width: min(calc(100% - 64px), 1200px);
@@ -764,7 +746,6 @@ input:focus-visible,
   .topbar { min-height: 76px; padding: 20px 18px 12px; }
   .mobile-menu { display: inline-flex !important; }
   .page-content { width: 100%; padding: 24px 18px 42px; }
-  .demo-banner { margin: 13px 18px 0; }
   .desktop-action { display: none !important; }
   .mobile-nav {
     position: fixed;
@@ -819,7 +800,6 @@ input:focus-visible,
   .connect-button span { display: none; }
   .profile-button { display: none; }
   .page-content { padding-inline: 13px; }
-  .demo-banner { margin-inline: 13px; }
   .panel { padding: 17px; border-radius: 12px; }
   .focus-card { min-height: 370px; }
   .focus-value strong { font-size: 44px; }
@@ -3229,3 +3209,37 @@ input:focus-visible,
 
 .nap-card { display: flex; flex-direction: column; gap: 2px; }
 
+
+/* Live vs demo data indicator */
+
+.data-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted-foreground);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.data-mode-badge.is-live { color: var(--foreground); border-color: color-mix(in srgb, var(--color-emerald) 34%, var(--border)); }
+.data-mode-badge.is-demo { color: var(--foreground); border-color: color-mix(in srgb, var(--color-indigo) 38%, var(--border)); }
+.data-mode-badge.is-demo .status-dot { background: var(--color-indigo); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-indigo) 12%, transparent); }
+.data-mode-badge.is-cache .status-dot { background: var(--color-amber); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-amber) 12%, transparent); }
+
+.connection-badge.is-demo .status-dot { background: var(--color-indigo); }
+.connection-badge.is-cache .status-dot { background: var(--color-amber); }
+.device-mode-detail { margin-top: 4px !important; color: var(--color-slate) !important; }
+
+/* Disabled option in a provider picker (e.g. Live data with no account connected) */
+.provider-picker label.is-disabled { opacity: 0.5; cursor: not-allowed; }
+.provider-picker label.is-disabled:hover { border-color: var(--color-graphite); }
+
+@media (max-width: 900px) {
+  .data-mode-badge span:not(.status-dot) { display: none; }
+  .data-mode-badge { padding: 5px 7px; }
+}
