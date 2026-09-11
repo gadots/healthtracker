@@ -1,9 +1,10 @@
-import { createDemoData } from './demo'
 import type {
   ActivityItem,
   DashboardData,
   HeartZoneMinutes,
+  NapItem,
   RawFitbitPayload,
+  RawHealthArchive,
   SleepStageCounts,
   SleepStageKey,
   SleepStageSegment,
@@ -139,6 +140,19 @@ function sleepStageTransitions(record: Json | null, timeline: SleepStageSegment[
     rem: countFor('rem'),
     wake: countFor('wake'),
   }
+}
+
+function parseNaps(input: unknown): NapItem[] {
+  return asArray(asObject(input).sleep)
+    .filter((item) => item.isMainSleep === false)
+    .map((item, index) => ({
+      id: String(item.logId ?? item.name ?? `nap-${index}`),
+      date: String(item.dateOfSleep ?? item.startTime ?? '').slice(0, 10),
+      startTime: String(item.startTime ?? ''),
+      endTime: String(item.endTime ?? ''),
+      durationMinutes: Math.round(Number(item.minutesAsleep ?? 0)),
+    }))
+    .filter((nap) => Boolean(nap.startTime && nap.endTime))
 }
 
 function activityHeartZoneMinutes(item: Json): HeartZoneMinutes | null {
@@ -362,6 +376,7 @@ export function normalizeFitbitData(payload: RawFitbitPayload): DashboardData {
       minutesAfterWakeUp: numeric(sleepRecord?.minutesAfterWakeUp),
       timeInBed: numeric(sleepRecord?.timeInBed),
       minutesAwake: numeric(sleepRecord?.minutesAwake),
+      naps: parseNaps(e.sleep),
     },
     body: {
       weightKg: numeric(latestWeight?.weight),
@@ -420,7 +435,15 @@ function buildInsights(activity: Json, heart: Json, sleep: Json | null, goals: J
   return insights
 }
 
-export function dataForDate(data: DashboardData, date: string) {
-  if (data.source === 'demo') return createDemoData(date)
-  return { ...data, selectedDate: date }
+/**
+ * Normalizes every cached day in the local encrypted archive into
+ * `DashboardData`, sorted oldest first. Shared by the assistant panel
+ * (`HealthAssistant.tsx`) and by the derived-score panels in `App.tsx`, so
+ * both consume exactly the same multi-day history.
+ */
+export function normalizeHealthArchive(archive: RawHealthArchive | null | undefined): DashboardData[] {
+  if (!archive) return []
+  return Object.values(archive.days)
+    .map((payload) => normalizeFitbitData(payload))
+    .sort((left, right) => left.selectedDate.localeCompare(right.selectedDate))
 }

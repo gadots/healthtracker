@@ -1,4 +1,15 @@
 import type { DashboardData, PageId, TrendPoint } from '@/types'
+import {
+  buildHealthMonitor,
+  computeDayStrain,
+  computeDynamicSleepPerformance,
+  computeRecoveryScore,
+  computeSleepConsistency,
+  computeSleepDebt,
+  computeSleepNeed,
+  computeWeeklyAssessment,
+  estimateMaxHeartRate,
+} from './scores'
 
 export interface AssistantNavigation {
   page?: PageId
@@ -111,6 +122,7 @@ function compactDay(data: DashboardData) {
       minutesAfterWakeUp: data.sleep.minutesAfterWakeUp,
       timeInBedMinutes: data.sleep.timeInBed,
       minutesAwake: data.sleep.minutesAwake,
+      naps: data.sleep.naps.map((nap) => ({ startTime: nap.startTime, endTime: nap.endTime, durationMinutes: nap.durationMinutes })),
     },
     body: {
       weightKg: data.body.weightKg,
@@ -166,10 +178,43 @@ export function buildHealthAssistantContext(
     syncCoverage: current.sync,
   })
 
+  // OpenFit-original derived scores (see src/lib/scores.ts and
+  // docs/DERIVED_SCORES.md) — the same numbers shown on Today/Health/Sleep,
+  // so the assistant can already explain "why is my Recovery low today?"
+  // without any assistant-side code. Each is null (and pruned by
+  // withoutNulls below) until it has enough history to be shown at all.
+  const strain = computeDayStrain(current, archiveDays)
+  const debt = computeSleepDebt(current)
+  const need = computeSleepNeed(current, strain, debt)
+  const sleepPerformance = computeDynamicSleepPerformance(current, archiveDays)
+  const recovery = computeRecoveryScore(current, sleepPerformance)
+  const consistency = computeSleepConsistency(current, archiveDays)
+  const weekly = computeWeeklyAssessment(current, archiveDays)
+  const maxHeartRate = estimateMaxHeartRate(current, archiveDays)
+  const healthMonitor = buildHealthMonitor(current)
+
+  const isDemo = current.source === 'demo'
+  const derived = withoutNulls({
+    disclaimer: `${isDemo ? 'WARNING: this context contains synthetic demo data, not the user\'s real measurements — never present these numbers as facts about their health. ' : ''}OpenFit-original estimates from the raw measurements above, not a reproduction of any manufacturer\'s proprietary algorithm and not a medical device.`,
+    recovery: { value: recovery.value, band: recovery.band },
+    dayStrain: { value: strain.value, band: strain.band, heartRateZoneMinutes: strain.value === null ? null : strain.zones },
+    maxHeartRateBpm: { value: maxHeartRate.bpm, isTodayOnly: maxHeartRate.isTodayOnly },
+    sleepPerformancePercent: sleepPerformance.percent,
+    sleepNeedMinutes: need.neededMinutes,
+    sleepDebtMinutes: debt.minutes,
+    sleepConsistencyPercent: consistency.percent,
+    weeklySleepPerformancePercent: weekly.averageSleepPerformance,
+    healthMonitorFlags: healthMonitor.metrics.map((metric) => ({ metric: metric.key, flag: metric.flag })),
+    naps: current.sleep.naps.map((nap) => ({ startTime: nap.startTime, endTime: nap.endTime, durationMinutes: nap.durationMinutes })),
+  })
+
   return JSON.stringify(withoutNulls({
     schema: 'openfit-health-context/v1',
     generatedAt: new Date().toISOString(),
     source: current.source,
+    // Explicit alongside `source` so the model cannot miss that the numbers
+    // are synthetic; a bare enum is easy to overlook.
+    dataMode: isDemo ? 'demo' : 'live',
     app: {
       currentPage: page,
       selectedDate: current.selectedDate,
@@ -198,6 +243,7 @@ export function buildHealthAssistantContext(
       daily: sortedDays,
     },
     selectedDayDetail: selectedDetail,
+    derivedScores: derived,
   }))
 }
 

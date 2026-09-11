@@ -29,7 +29,7 @@ Depending on regional and account availability, Fitbit Air supports 24/7 heart r
 ## Hard Limits
 
 - Data appears only after synchronization with the mobile app. There is no public BLE stream for desktop apps.
-- Readiness Score, Cardio Load, Sleep Score, Stress Score, and proprietary coaching are not all exposed as Google or Fitbit values. OpenFit shows base measurements and local insights. It does not pretend to reproduce unavailable proprietary scores.
+- Readiness Score, Cardio Load, Fitbit's own Sleep Score, Stress Score, and manufacturer coaching are not exposed as Google or Fitbit values, and OpenFit does not reproduce any manufacturer's proprietary algorithm for them. OpenFit does compute a small set of its own, clearly labeled composite estimates (Recovery, Day Strain, Sleep Performance, Sleep Need/Debt/Consistency) from the base measurements below — see `docs/DERIVED_SCORES.md` for each formula, its inputs, and the minimum data it needs before it's shown at all.
 - GPS location is requested only to enrich compatible workouts. It is not rendered on a map yet.
 - Availability and granularity depend on model, region, firmware, plan, and OAuth consent.
 

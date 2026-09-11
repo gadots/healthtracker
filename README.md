@@ -28,7 +28,16 @@ The renderer is built with React 19, shadcn/Radix, Tailwind CSS v4, assistant-ui
 - Adaptive views (Today, Activity, Health, Sleep, Body, Devices) that only show sections with real data — no empty cards.
 - Steps, calories, distance, floors, active/zone/sedentary minutes, heart rate, HRV, breathing rate, SpO2, skin and core temperature, VO2 max/cardio score, ECG classification, irregular-rhythm alerts, blood glucose, sleep stages and timeline, weight, body fat, hydration, and nutrition — whatever your device and consent actually provide.
 - Encrypted per-day local archive so past days load instantly without a new network request.
-- Works fully offline in **Demo mode** with no account connected.
+- **Live / Demo switch** in Settings with an always-visible indicator in the top bar, so you always know whether you are looking at your own measurements or sample data. Demo can be selected even while your account stays connected: live sync simply pauses, and exports stay disabled so sample data can never be mistaken for real measurements.
+- Demo mode ships a full 14-day synthetic history, so **every** metric and derived score is visible and verifiable without connecting an account.
+
+**Derived scores**
+- **Recovery (0–100)** — how favorable today's HRV, resting heart rate, breathing rate, and last night's sleep look against your own recent baseline.
+- **Day Strain (0–21)** — cumulative cardiovascular effort for the day, from your intraday heart rate bucketed into personalized zones.
+- **Sleep Performance, Sleep Need, Sleep Debt, Sleep Consistency** — how much sleep you actually got versus a target that adapts to your recent strain and accumulated debt, plus how stable your bed/wake times have been.
+- **Health Monitor** — last night's vitals each flagged as inside or outside *your* typical range, not a generic clinical threshold.
+- **Personalized Max Heart Rate** and **daily heart-rate zones**, refined automatically as more days accumulate.
+- These are OpenFit's own documented estimates — not a reproduction of any manufacturer's proprietary algorithm, and not medical measurements. Each is hidden rather than guessed when there isn't enough data behind it. Formulas and inputs: [docs/DERIVED_SCORES.md](docs/DERIVED_SCORES.md).
 
 **Health providers**
 - **Google Health API v4** as the default, recommended provider.
@@ -67,7 +76,49 @@ The desktop application can replace the browsing and analysis experience, but it
 
 # Part 2 — Getting started
 
-## Requirements
+There are two ways to get OpenFit: download an installer, or run it from source. Downloading is
+the normal path — you only need the source route if you intend to change the code.
+
+## Install on macOS
+
+1. Open the [Releases page](https://github.com/gadots/healthtracker/releases) and download one
+   disk image from the latest release:
+   - `OpenFit-<version>-arm64.dmg` for Apple Silicon (M1 and later).
+   - `OpenFit-<version>-x64.dmg` for Intel Macs.
+2. Open the disk image and drag **OpenFit** into Applications.
+3. **First launch only:** right-click OpenFit in Applications and choose **Open**, then confirm.
+
+That third step exists because these builds are not signed with an Apple Developer ID, so macOS
+asks for confirmation once. Double-clicking a fresh download shows "cannot be verified" instead;
+right-click → Open is what gets past it. macOS remembers the choice — afterwards OpenFit opens
+from the Dock or Launchpad like any other app, with no terminal involved.
+
+Optionally verify the download against `SHA256SUMS.txt` from the same release:
+
+```bash
+shasum -a 256 ~/Downloads/OpenFit-*.dmg
+```
+
+### Updating
+
+There is no auto-update. When a new release is published, download the newer disk image and drag
+it over the installed app. Your settings, Google credentials, and cached health history are kept:
+they live in `~/Library/Application Support/pulseboard-fitbit-desktop/`, outside the app bundle.
+The installed version is shown at the bottom of the Settings dialog, along with a link to the
+Releases page.
+
+### The AI assistant needs a separate install
+
+The disk image does not bundle the Claude Code or Codex CLI. Without one of them installed and
+signed in, everything else works and the assistant panel simply reports that no provider is
+available. See the requirements below.
+
+Windows and Linux installers are configured but not built or published — see
+[docs/RELEASE.md](docs/RELEASE.md).
+
+## Run from source
+
+### Requirements
 
 - Node.js 22 or later
 - npm 10 or later
@@ -77,7 +128,7 @@ The desktop application can replace the browsing and analysis experience, but it
 
   Neither is required to run OpenFit itself — without either, the dashboard works normally and the assistant panel just shows as unavailable.
 
-## Quick start
+### Quick start
 
 ```bash
 npm install
@@ -94,7 +145,10 @@ npm run capture:ui  # Run desktop/mobile visual QA in Electron Chromium
 npm run dist        # Package the app for macOS, Windows, or Linux
 ```
 
-Packages generated locally in `release/` are unsigned unless an Apple Developer ID certificate is available in the Keychain. For public distribution, follow the [release checklist](docs/RELEASE.md).
+`npm run dist` writes disk images to `release/`, unsigned unless an Apple Developer ID
+certificate is available in the Keychain. Published releases are built the same way by
+`.github/workflows/release.yml` whenever a `v*` tag is pushed; see
+[docs/RELEASE.md](docs/RELEASE.md).
 
 ## Connect Google Health
 
@@ -259,6 +313,10 @@ electron/
 src/
   components/                 Views, charts, and assistant-ui chat
   data/                       Demo data and provider-independent normalization
+  lib/scores.ts               Derived scores (Recovery, Strain, Sleep Need/Debt…)
+  lib/data-mode.ts            Resolves live vs demo into one labelled state
+  lib/preferences.ts          Persists the live/demo choice
+  lib/home-analysis.ts        Personal-baseline comparisons and daily headline
   lib/                        Formatting and pure utilities
   App.tsx                     UI, connection-state, and Settings orchestration
   types.ts                    Shared renderer/preload contracts
@@ -266,6 +324,7 @@ scripts/
   capture-ui.cjs              Electron visual smoke test
 docs/
   ARCHITECTURE.md             System decisions, security boundaries, audit notes
+  DERIVED_SCORES.md           Formulas, inputs, and availability of each score
   DATA_COVERAGE.md            Data coverage and limitations
   GOOGLE_HEALTH_SETUP.md      Extended OAuth setup guide
   RELEASE.md                  Signing, notarization, and release process

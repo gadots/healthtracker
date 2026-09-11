@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeFitbitData } from './normalize'
-import type { RawFitbitPayload } from '../types'
+import { normalizeFitbitData, normalizeHealthArchive } from './normalize'
+import type { RawFitbitPayload, RawHealthArchive } from '../types'
 
 describe('normalizeFitbitData', () => {
   it('normalizes legacy Fitbit responses without inventing missing metrics', () => {
@@ -235,5 +235,75 @@ describe('normalizeFitbitData', () => {
     expect(result.trends).toHaveLength(2)
     expect(result.trends[0]).toMatchObject({ hrvMs: 44, spo2: 96.8, breathingRate: 14.4, skinTemperature: -0.1 })
     expect(result.trends[1]).toMatchObject({ hrvMs: 48, spo2: 97.2, breathingRate: 14.8, skinTemperature: 0.2 })
+  })
+})
+
+function payloadFor(date: string, sleep: unknown[]): RawFitbitPayload {
+  return {
+    source: 'google-health',
+    date,
+    generatedAt: `${date}T08:00:00Z`,
+    endpoints: { sleep: { sleep } },
+    errors: [],
+    rateLimit: { limit: null, remaining: null, resetSeconds: null },
+  }
+}
+
+describe('nap parsing', () => {
+  const mainSleep = { isMainSleep: true, minutesAsleep: 400, startTime: '2026-06-21T23:00:00', endTime: '2026-06-22T06:00:00' }
+
+  it('extracts non-main sleep records as naps and leaves the main night out', () => {
+    const result = normalizeFitbitData(payloadFor('2026-06-22', [
+      mainSleep,
+      { logId: 'nap-a', isMainSleep: false, minutesAsleep: 27, dateOfSleep: '2026-06-22', startTime: '2026-06-22T14:20:00', endTime: '2026-06-22T14:47:00' },
+    ]))
+
+    expect(result.sleep.naps).toHaveLength(1)
+    expect(result.sleep.naps[0]).toMatchObject({ id: 'nap-a', date: '2026-06-22', durationMinutes: 27 })
+    expect(result.sleep.totalMinutes).toBe(400)
+  })
+
+  it('drops nap records with no usable timestamps', () => {
+    const result = normalizeFitbitData(payloadFor('2026-06-22', [
+      mainSleep,
+      { isMainSleep: false, minutesAsleep: 20, startTime: '', endTime: '' },
+      { isMainSleep: false, minutesAsleep: 20, startTime: '2026-06-22T15:00:00' },
+    ]))
+    expect(result.sleep.naps).toHaveLength(0)
+  })
+
+  it('falls back to an id indexed within the naps themselves, and rounds the duration', () => {
+    const result = normalizeFitbitData(payloadFor('2026-06-22', [
+      mainSleep,
+      { isMainSleep: false, minutesAsleep: 26.7, startTime: '2026-06-22T14:00:00', endTime: '2026-06-22T14:27:00' },
+    ]))
+    expect(result.sleep.naps[0].id).toBe('nap-0')
+    expect(result.sleep.naps[0].durationMinutes).toBe(27)
+  })
+
+  it('reports no naps when the day only has a main sleep', () => {
+    expect(normalizeFitbitData(payloadFor('2026-06-22', [mainSleep])).sleep.naps).toEqual([])
+  })
+})
+
+describe('normalizeHealthArchive', () => {
+  it('returns an empty list for a missing archive', () => {
+    expect(normalizeHealthArchive(null)).toEqual([])
+    expect(normalizeHealthArchive(undefined)).toEqual([])
+    expect(normalizeHealthArchive({ version: 1, lastDate: null, days: {} })).toEqual([])
+  })
+
+  it('normalizes every cached day and sorts them oldest first', () => {
+    const archive: RawHealthArchive = {
+      version: 1,
+      lastDate: '2026-06-22',
+      days: {
+        '2026-06-22': payloadFor('2026-06-22', []),
+        '2026-06-20': payloadFor('2026-06-20', []),
+        '2026-06-21': payloadFor('2026-06-21', []),
+      },
+    }
+
+    expect(normalizeHealthArchive(archive).map((day) => day.selectedDate)).toEqual(['2026-06-20', '2026-06-21', '2026-06-22'])
   })
 })

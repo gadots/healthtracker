@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Check the tag matches package.json version
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          package_version="$(node -p "require('./package.json').version")"
+          if [ "$tag_version" != "$package_version" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package.json version $package_version." >&2
+            echo "Bump the version in package.json and retag." >&2
+            exit 1
+          fi
+          echo "Releasing OpenFit $package_version."
+
+      - run: npm ci
+      - run: npm run check
+
+      - name: Build the macOS disk images
+        # No Developer ID identity is configured on purpose: these are unsigned,
+        # un-notarized builds for personal use. See docs/RELEASE.md.
+        run: npm run dist -- --mac --arm64 --x64
+
+      - name: Verify the arm64 bundle carries a signature
+        # electron-builder ad-hoc signs arm64 bundles when it finds no identity.
+        # An arm64 app with no signature at all is refused by macOS ("damaged"),
+        # not merely warned about, so a missing signature must fail the release.
+        run: |
+          codesign -dv --verbose=4 "release/mac-arm64/OpenFit.app"
+
+      - name: Publish checksums alongside the disk images
+        run: |
+          cd release
+          shasum -a 256 ./*.dmg > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          cat > release-notes.md <<NOTES
+          ## Install
+
+          Download one disk image:
+
+          - **\`OpenFit-${version}-arm64.dmg\`** — Apple Silicon (M1 and later).
+          - **\`OpenFit-${version}-x64.dmg\`** — Intel Macs.
+
+          Open the disk image and drag **OpenFit** into Applications.
+
+          These builds are **not signed with an Apple Developer ID**, so the first
+          launch needs one extra step: right-click OpenFit in Applications, choose
+          **Open**, then confirm. macOS remembers the choice; afterwards it opens
+          normally from the Dock or Launchpad.
+
+          ## Update
+
+          There is no auto-update. Download the newer disk image and drag it over
+          the installed app. Your settings, credentials and cached health history
+          live outside the app bundle and are preserved.
+
+          ## Verify the download
+
+          \`shasum -a 256 OpenFit-${version}-arm64.dmg\` and compare it with
+          \`SHA256SUMS.txt\`.
+          NOTES
+          gh release create "$GITHUB_REF_NAME" \
+            release/*.dmg \
+            release/SHA256SUMS.txt \
+            --title "OpenFit $version" \
+            --notes-file release-notes.md
