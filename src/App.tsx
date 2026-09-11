@@ -861,8 +861,31 @@ function SettingsDialog({
 
         <Separator className="settings-separator" />
         <AssistantProviderSettings />
+
+        <Separator className="settings-separator" />
+        <AppVersionNote />
       </DialogContent>
     </Dialog>
+  )
+}
+
+/**
+ * OpenFit ships without auto-update, so the installed version has to be legible
+ * from inside the app: it is the only way to tell a current build from a stale
+ * one before downloading a new disk image.
+ */
+function AppVersionNote() {
+  const openReleases = () => {
+    const url = 'https://github.com/gadots/healthtracker/releases'
+    if (window.fitbit) void window.fitbit.openExternal(url)
+    else window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  return (
+    <div className="version-note">
+      <p>OpenFit <strong>{__APP_VERSION__}</strong> · updates are installed manually.</p>
+      <button type="button" className="portal-link" onClick={openReleases}>Check for a newer release <ExternalIcon /></button>
+    </div>
   )
 }
 

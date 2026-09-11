@@ -728,6 +728,9 @@ input:focus-visible,
 .assistant-settings { display: flex; flex-direction: column; gap: 12px; }
 .assistant-settings h3 { margin: 0; color: var(--color-snow); font-size: 13px; font-weight: 590; }
 .assistant-settings-hint { margin: 0; color: var(--color-fog); font-size: 13px; line-height: 1.5; }
+.version-note { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.version-note p { margin: 0; color: var(--color-fog); font-size: 12px; line-height: 1.5; }
+.version-note strong { color: var(--color-snow); font-weight: 590; }
 
 @media (max-width: 1080px) {
   .sidebar { width: 170px; }

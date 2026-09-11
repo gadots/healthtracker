@@ -76,7 +76,49 @@ The desktop application can replace the browsing and analysis experience, but it
 
 # Part 2 — Getting started
 
-## Requirements
+There are two ways to get OpenFit: download an installer, or run it from source. Downloading is
+the normal path — you only need the source route if you intend to change the code.
+
+## Install on macOS
+
+1. Open the [Releases page](https://github.com/gadots/healthtracker/releases) and download one
+   disk image from the latest release:
+   - `OpenFit-<version>-arm64.dmg` for Apple Silicon (M1 and later).
+   - `OpenFit-<version>-x64.dmg` for Intel Macs.
+2. Open the disk image and drag **OpenFit** into Applications.
+3. **First launch only:** right-click OpenFit in Applications and choose **Open**, then confirm.
+
+That third step exists because these builds are not signed with an Apple Developer ID, so macOS
+asks for confirmation once. Double-clicking a fresh download shows "cannot be verified" instead;
+right-click → Open is what gets past it. macOS remembers the choice — afterwards OpenFit opens
+from the Dock or Launchpad like any other app, with no terminal involved.
+
+Optionally verify the download against `SHA256SUMS.txt` from the same release:
+
+```bash
+shasum -a 256 ~/Downloads/OpenFit-*.dmg
+```
+
+### Updating
+
+There is no auto-update. When a new release is published, download the newer disk image and drag
+it over the installed app. Your settings, Google credentials, and cached health history are kept:
+they live in `~/Library/Application Support/pulseboard-fitbit-desktop/`, outside the app bundle.
+The installed version is shown at the bottom of the Settings dialog, along with a link to the
+Releases page.
+
+### The AI assistant needs a separate install
+
+The disk image does not bundle the Claude Code or Codex CLI. Without one of them installed and
+signed in, everything else works and the assistant panel simply reports that no provider is
+available. See the requirements below.
+
+Windows and Linux installers are configured but not built or published — see
+[docs/RELEASE.md](docs/RELEASE.md).
+
+## Run from source
+
+### Requirements
 
 - Node.js 22 or later
 - npm 10 or later
@@ -86,7 +128,7 @@ The desktop application can replace the browsing and analysis experience, but it
 
   Neither is required to run OpenFit itself — without either, the dashboard works normally and the assistant panel just shows as unavailable.
 
-## Quick start
+### Quick start
 
 ```bash
 npm install
@@ -103,7 +145,10 @@ npm run capture:ui  # Run desktop/mobile visual QA in Electron Chromium
 npm run dist        # Package the app for macOS, Windows, or Linux
 ```
 
-Packages generated locally in `release/` are unsigned unless an Apple Developer ID certificate is available in the Keychain. For public distribution, follow the [release checklist](docs/RELEASE.md).
+`npm run dist` writes disk images to `release/`, unsigned unless an Apple Developer ID
+certificate is available in the Keychain. Published releases are built the same way by
+`.github/workflows/release.yml` whenever a `v*` tag is pushed; see
+[docs/RELEASE.md](docs/RELEASE.md).
 
 ## Connect Google Health
 
