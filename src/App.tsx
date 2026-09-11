@@ -35,6 +35,7 @@ import type { AssistantProviderDescriptor, AssistantProviderId, DashboardData, F
 import { createDemoData, localIso } from '@/data/demo'
 import { normalizeFitbitData } from '@/data/normalize'
 import { formatDate, relativeTime } from '@/lib/format'
+import { fitbitBridge, isElectron } from '@/lib/bridge'
 import { cn } from '@/lib/utils'
 import { ActivityView, BodyView, DevicesView, HealthView, SleepView, TodayView } from '@/components/Views'
 import { HealthAssistant } from '@/components/HealthAssistant'
@@ -75,7 +76,7 @@ const navItems: Array<{ id: PageId; label: string; copy: string; icon: AppIcon; 
 ]
 
 const defaultStatus: FitbitAuthStatus = {
-  isElectron: Boolean(window.fitbit),
+  isElectron,
   configured: false,
   connected: false,
   clientId: '',
@@ -143,9 +144,9 @@ export default function App() {
   }, [data.selectedDate])
 
   const loadNativeState = useCallback(async () => {
-    if (!window.fitbit) return
+    if (!fitbitBridge) return
     try {
-      const [nextStatus, cached] = await Promise.all([window.fitbit.getStatus(), window.fitbit.getCachedData()])
+      const [nextStatus, cached] = await Promise.all([fitbitBridge.getStatus(), fitbitBridge.getCachedData()])
       setStatus(nextStatus)
       if (cached) {
         const normalized = normalizeFitbitData(cached)
@@ -160,7 +161,7 @@ export default function App() {
   }, [])
 
   const runSync = useCallback(async (requestedDate?: string) => {
-    if (!window.fitbit) {
+    if (!fitbitBridge) {
       setSettingsOpen(true)
       return
     }
@@ -184,7 +185,7 @@ export default function App() {
         setSyncProgress({ completed: 0, total: 0 })
 
         try {
-          const payload = await window.fitbit.sync(date)
+          const payload = await fitbitBridge.sync(date)
           const normalized = normalizeFitbitData(payload)
 
           if (selectedDateRef.current === date) {
@@ -200,7 +201,7 @@ export default function App() {
             })
           }
 
-          void window.fitbit.getStatus().then(setStatus).catch(() => undefined)
+          void fitbitBridge.getStatus().then(setStatus).catch(() => undefined)
         } catch (error) {
           const queuedDate = queuedDateRef.current
           const failedDateIsStillSelected = selectedDateRef.current === date
@@ -229,8 +230,8 @@ export default function App() {
 
   useEffect(() => {
     void loadNativeState()
-    if (!window.fitbit) return
-    const unsubscribeAuth = window.fitbit.onAuthComplete(async (result) => {
+    if (!fitbitBridge) return
+    const unsubscribeAuth = fitbitBridge.onAuthComplete(async (result) => {
       setConnecting(false)
       if (!result.ok) {
         setToast({ tone: 'error', message: result.error ?? 'Authorization failed.' })
@@ -244,7 +245,7 @@ export default function App() {
       setSelectedDate(authDate)
       void runSync(authDate)
     })
-    const unsubscribeSync = window.fitbit.onSyncProgress((progress) => {
+    const unsubscribeSync = fitbitBridge.onSyncProgress((progress) => {
       if (syncingRef.current && (!progress.date || progress.date === syncTargetDateRef.current)) {
         setSyncProgress(progress)
       }
@@ -278,7 +279,7 @@ export default function App() {
   }
 
   const connect = async () => {
-    if (!window.fitbit) {
+    if (!fitbitBridge) {
       setToast({ tone: 'neutral', message: 'Launch OpenFit in the Electron app to connect your health provider.' })
       return
     }
@@ -288,7 +289,7 @@ export default function App() {
     }
     setConnecting(true)
     try {
-      const result = await window.fitbit.connect()
+      const result = await fitbitBridge.connect()
       if (!result.ok) throw new Error(result.message ?? 'Unable to start OAuth.')
       setToast({ tone: 'neutral', message: 'Complete authorization in your browser.' })
     } catch (error) {
@@ -298,12 +299,12 @@ export default function App() {
   }
 
   const saveAndConnect = async (config: FitbitConfigInput) => {
-    if (!window.fitbit) return
+    if (!fitbitBridge) return
     try {
-      const nextStatus = await window.fitbit.saveConfig(config)
+      const nextStatus = await fitbitBridge.saveConfig(config)
       setStatus(nextStatus)
       setConnecting(true)
-      const result = await window.fitbit.connect()
+      const result = await fitbitBridge.connect()
       if (!result.ok) throw new Error(result.message ?? 'Unable to start OAuth.')
       setToast({ tone: 'neutral', message: 'Authorize OpenFit in the browser window.' })
     } catch (error) {
@@ -313,8 +314,8 @@ export default function App() {
   }
 
   const disconnect = async () => {
-    if (!window.fitbit) return
-    setStatus(await window.fitbit.disconnect())
+    if (!fitbitBridge) return
+    setStatus(await fitbitBridge.disconnect())
     setData(createDemoData(selectedDate))
     setSettingsOpen(false)
     setPage('today')
@@ -322,11 +323,11 @@ export default function App() {
   }
 
   const exportData = async () => {
-    if (!window.fitbit || data.source === 'demo') {
+    if (!fitbitBridge || data.source === 'demo') {
       setToast({ tone: 'neutral', message: 'Connect Google Health to export real data.' })
       return
     }
-    const result = await window.fitbit.exportData()
+    const result = await fitbitBridge.exportData()
     if (!result.canceled) setToast({ tone: 'success', message: 'JSON archive exported.' })
   }
 
@@ -416,15 +417,17 @@ export default function App() {
               </div>
             )}
 
-            <IconButton
-              label={assistantOpen ? 'Close health assistant' : 'Open health assistant'}
-              className={cn('assistant-toggle', assistantOpen && 'is-active')}
-              aria-controls="health-assistant"
-              aria-expanded={assistantOpen}
-              onClick={() => setAssistantOpen((open) => !open)}
-            >
-              <Sparkles />
-            </IconButton>
+            {!__WEB_TARGET__ && (
+              <IconButton
+                label={assistantOpen ? 'Close health assistant' : 'Open health assistant'}
+                className={cn('assistant-toggle', assistantOpen && 'is-active')}
+                aria-controls="health-assistant"
+                aria-expanded={assistantOpen}
+                onClick={() => setAssistantOpen((open) => !open)}
+              >
+                <Sparkles />
+              </IconButton>
+            )}
             {status.connected ? (
               <>
                 {syncing && (
@@ -481,13 +484,15 @@ export default function App() {
         </div>
       </SidebarInset>
 
-      <HealthAssistant
-        open={assistantOpen}
-        data={data}
-        page={page}
-        onOpenChange={setAssistantOpen}
-        onNavigate={navigateFromAssistant}
-      />
+      {!__WEB_TARGET__ && (
+        <HealthAssistant
+          open={assistantOpen}
+          data={data}
+          page={page}
+          onOpenChange={setAssistantOpen}
+          onNavigate={navigateFromAssistant}
+        />
+      )}
 
       <SettingsDialog
         open={settingsOpen}
@@ -697,7 +702,7 @@ function SettingsDialog({
     const url = provider === 'google-health'
       ? 'https://console.cloud.google.com/apis/library/health.googleapis.com'
       : 'https://dev.fitbit.com/apps/new'
-    if (window.fitbit) void window.fitbit.openExternal(url)
+    if (fitbitBridge) void fitbitBridge.openExternal(url)
     else window.open(url, '_blank', 'noopener,noreferrer')
   }
 
@@ -707,7 +712,9 @@ function SettingsDialog({
         <DialogHeader>
           <div className="dialog-icon"><CloudIcon /></div>
           <DialogTitle>{status.connected && !editing ? `${providerLabel} connected` : `Connect ${providerLabel}`}</DialogTitle>
-          <DialogDescription>Your credentials and data remain encrypted on this computer.</DialogDescription>
+          <DialogDescription>{__WEB_TARGET__
+            ? 'Your session stays in an encrypted, server-side cookie. No health data is stored on a server.'
+            : 'Your credentials and data remain encrypted on this computer.'}</DialogDescription>
         </DialogHeader>
 
         {status.connected && !editing ? (
@@ -716,10 +723,21 @@ function SettingsDialog({
             <div><h3>Sync active</h3><p>Last updated {relativeTime(status.lastSyncAt)}.</p></div>
             <div className="connected-actions">
               <Button onClick={onConnect} disabled={connecting}>{connecting ? <LoaderCircle className="spin" /> : <RefreshCw />} Reauthorize</Button>
-              <Button variant="outline" onClick={() => setEditing(true)}><SettingsIcon /> Edit configuration</Button>
+              {!__WEB_TARGET__ && <Button variant="outline" onClick={() => setEditing(true)}><SettingsIcon /> Edit configuration</Button>}
               <Button variant="outline" onClick={() => void onExport()}><ExportIcon /> Export data</Button>
-              <Button variant="destructive" onClick={() => void onDisconnect()}><DisconnectIcon /> Disconnect and delete local data</Button>
+              <Button variant="destructive" onClick={() => void onDisconnect()}><DisconnectIcon /> {__WEB_TARGET__ ? 'Disconnect and clear this session' : 'Disconnect and delete local data'}</Button>
             </div>
+          </div>
+        ) : __WEB_TARGET__ ? (
+          <div className="connected-state">
+            <div><h3>Read-only access</h3><p>You will be redirected to Google to grant read-only access to your activity, heart, sleep, and body measurements.</p></div>
+            <div className="connected-actions">
+              <Button onClick={onConnect} disabled={connecting || !status.configured}>{connecting ? <LoaderCircle className="spin" /> : <CloudIcon />} Connect Google Health</Button>
+            </div>
+            {!status.configured && (
+              <p className="scope-note">The server is missing its Google OAuth configuration. Set <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> and restart it.</p>
+            )}
+            <div className="scope-note"><ShieldIcon /><p>Read-only permissions for activity, heart, sleep, and authorized measurements.</p></div>
           </div>
         ) : (
           <form onSubmit={submit} className="settings-form">
@@ -760,8 +778,12 @@ function SettingsDialog({
           </form>
         )}
 
-        <Separator className="settings-separator" />
-        <AssistantProviderSettings />
+        {!__WEB_TARGET__ && (
+          <>
+            <Separator className="settings-separator" />
+            <AssistantProviderSettings />
+          </>
+        )}
       </DialogContent>
     </Dialog>
   )
