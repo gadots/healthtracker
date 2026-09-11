@@ -20,6 +20,7 @@ import {
   type AssistantNavigation,
 } from '@/lib/health-assistant'
 import { relativeTime } from '@/lib/format'
+import { fitbitBridge } from '@/lib/bridge'
 import type {
   AssistantProviderDescriptor,
   AssistantProviderId,
@@ -196,9 +197,9 @@ export function HealthAssistant({
       if (!prompt) throw new Error('Write a question before sending it.')
 
       let archived: DashboardData[] = []
-      if (window.fitbit && dataRef.current.source !== 'demo') {
+      if (fitbitBridge && dataRef.current.source !== 'demo') {
         try {
-          archived = archiveData(await window.fitbit.getCachedArchive())
+          archived = archiveData(await fitbitBridge.getCachedArchive())
         } catch {
           archived = []
         }
