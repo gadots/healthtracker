@@ -13,6 +13,7 @@ export function HealthAssistant(_props: {
   open: boolean
   data: DashboardData
   page: PageId
+  archiveDays: DashboardData[]
   onOpenChange: (open: boolean) => void
   onNavigate: (navigation: AssistantNavigation) => void
 }) {

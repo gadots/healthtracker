@@ -76,8 +76,9 @@ The desktop application can replace the browsing and analysis experience, but it
 
 # Part 2 — Getting started
 
-There are two ways to get OpenFit: download an installer, or run it from source. Downloading is
-the normal path — you only need the source route if you intend to change the code.
+There are three ways to run OpenFit: download the macOS installer, run the desktop app from
+source, or host it as a web app. Downloading is the normal path — take the source route if you
+intend to change the code, and the web route if you want the dashboard in a browser.
 
 ## Install on macOS
 
