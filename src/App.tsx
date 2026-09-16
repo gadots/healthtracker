@@ -36,6 +36,7 @@ import type { AssistantProviderDescriptor, AssistantProviderId, DashboardData, D
 import { createDemoArchive, createDemoData, localIso } from '@/data/demo'
 import { normalizeFitbitData, normalizeHealthArchive } from '@/data/normalize'
 import { formatDate, relativeTime } from '@/lib/format'
+import { fitbitBridge, isElectron } from '@/lib/bridge'
 import { resolveDataMode, type DataModeState } from '@/lib/data-mode'
 import { readDataModePreference, writeDataModePreference } from '@/lib/preferences'
 import { cn } from '@/lib/utils'
@@ -78,7 +79,7 @@ const navItems: Array<{ id: PageId; label: string; copy: string; icon: AppIcon; 
 ]
 
 const defaultStatus: FitbitAuthStatus = {
-  isElectron: Boolean(window.fitbit),
+  isElectron,
   configured: false,
   connected: false,
   clientId: '',
@@ -156,9 +157,9 @@ export default function App() {
   }, [dataModePreference])
 
   const loadNativeState = useCallback(async () => {
-    if (!window.fitbit) return
+    if (!fitbitBridge) return
     try {
-      const [nextStatus, cached] = await Promise.all([window.fitbit.getStatus(), window.fitbit.getCachedData()])
+      const [nextStatus, cached] = await Promise.all([fitbitBridge.getStatus(), fitbitBridge.getCachedData()])
       setStatus(nextStatus)
       // In demo mode the cached payload must not replace what is on screen.
       if (cached && dataModeRef.current !== 'demo') {
@@ -177,9 +178,9 @@ export default function App() {
   // Need/Debt/Consistency): the same encrypted local archive the assistant
   // panel already reads, normalized once here and threaded into the views.
   const refreshArchive = useCallback(async () => {
-    if (!window.fitbit) return
+    if (!fitbitBridge) return
     try {
-      setArchiveDays(normalizeHealthArchive(await window.fitbit.getCachedArchive()))
+      setArchiveDays(normalizeHealthArchive(await fitbitBridge.getCachedArchive()))
     } catch {
       // Keep whatever history we already have; derived scores just fall
       // back to fewer sample days until the next successful refresh.
@@ -190,7 +191,7 @@ export default function App() {
     // Reachable from onAuthComplete and assistant navigation, not just the
     // refresh button, so the demo guard lives here rather than at call sites.
     if (dataModeRef.current === 'demo') return
-    if (!window.fitbit) {
+    if (!fitbitBridge) {
       setSettingsOpen(true)
       return
     }
@@ -214,7 +215,7 @@ export default function App() {
         setSyncProgress({ completed: 0, total: 0 })
 
         try {
-          const payload = await window.fitbit.sync(date)
+          const payload = await fitbitBridge.sync(date)
           const normalized = normalizeFitbitData(payload)
 
           if (selectedDateRef.current === date) {
@@ -230,7 +231,7 @@ export default function App() {
             })
           }
 
-          void window.fitbit.getStatus().then(setStatus).catch(() => undefined)
+          void fitbitBridge.getStatus().then(setStatus).catch(() => undefined)
           if (!payload.cacheHit) void refreshArchive()
         } catch (error) {
           const queuedDate = queuedDateRef.current
@@ -261,8 +262,8 @@ export default function App() {
   useEffect(() => {
     void loadNativeState()
     void refreshArchive()
-    if (!window.fitbit) return
-    const unsubscribeAuth = window.fitbit.onAuthComplete(async (result) => {
+    if (!fitbitBridge) return
+    const unsubscribeAuth = fitbitBridge.onAuthComplete(async (result) => {
       setConnecting(false)
       if (!result.ok) {
         setToast({ tone: 'error', message: result.error ?? 'Authorization failed.' })
@@ -276,7 +277,7 @@ export default function App() {
       setSelectedDate(authDate)
       void runSync(authDate)
     })
-    const unsubscribeSync = window.fitbit.onSyncProgress((progress) => {
+    const unsubscribeSync = fitbitBridge.onSyncProgress((progress) => {
       if (syncingRef.current && (!progress.date || progress.date === syncTargetDateRef.current)) {
         setSyncProgress(progress)
       }
@@ -350,7 +351,7 @@ export default function App() {
   }
 
   const connect = async () => {
-    if (!window.fitbit) {
+    if (!fitbitBridge) {
       setToast({ tone: 'neutral', message: 'Launch OpenFit in the Electron app to connect your health provider.' })
       return
     }
@@ -360,7 +361,7 @@ export default function App() {
     }
     setConnecting(true)
     try {
-      const result = await window.fitbit.connect()
+      const result = await fitbitBridge.connect()
       if (!result.ok) throw new Error(result.message ?? 'Unable to start OAuth.')
       setToast({ tone: 'neutral', message: 'Complete authorization in your browser.' })
     } catch (error) {
@@ -370,12 +371,12 @@ export default function App() {
   }
 
   const saveAndConnect = async (config: FitbitConfigInput) => {
-    if (!window.fitbit) return
+    if (!fitbitBridge) return
     try {
-      const nextStatus = await window.fitbit.saveConfig(config)
+      const nextStatus = await fitbitBridge.saveConfig(config)
       setStatus(nextStatus)
       setConnecting(true)
-      const result = await window.fitbit.connect()
+      const result = await fitbitBridge.connect()
       if (!result.ok) throw new Error(result.message ?? 'Unable to start OAuth.')
       setToast({ tone: 'neutral', message: 'Authorize OpenFit in the browser window.' })
     } catch (error) {
@@ -385,8 +386,8 @@ export default function App() {
   }
 
   const disconnect = async () => {
-    if (!window.fitbit) return
-    setStatus(await window.fitbit.disconnect())
+    if (!fitbitBridge) return
+    setStatus(await fitbitBridge.disconnect())
     setData(createDemoData(selectedDate))
     setArchiveDays([])
     setSettingsOpen(false)
@@ -396,7 +397,7 @@ export default function App() {
 
   const exportData = async () => {
     // Keeps refusing to export synthetic data; only the wording adapts.
-    if (!window.fitbit || data.source === 'demo') {
+    if (!fitbitBridge || data.source === 'demo') {
       setToast({
         tone: 'neutral',
         message: dataMode.forced
@@ -405,7 +406,7 @@ export default function App() {
       })
       return
     }
-    const result = await window.fitbit.exportData()
+    const result = await fitbitBridge.exportData()
     if (!result.canceled) setToast({ tone: 'success', message: 'JSON archive exported.' })
   }
 
@@ -502,15 +503,17 @@ export default function App() {
               </div>
             )}
 
-            <IconButton
-              label={assistantOpen ? 'Close health assistant' : 'Open health assistant'}
-              className={cn('assistant-toggle', assistantOpen && 'is-active')}
-              aria-controls="health-assistant"
-              aria-expanded={assistantOpen}
-              onClick={() => setAssistantOpen((open) => !open)}
-            >
-              <Sparkles />
-            </IconButton>
+            {!__WEB_TARGET__ && (
+              <IconButton
+                label={assistantOpen ? 'Close health assistant' : 'Open health assistant'}
+                className={cn('assistant-toggle', assistantOpen && 'is-active')}
+                aria-controls="health-assistant"
+                aria-expanded={assistantOpen}
+                onClick={() => setAssistantOpen((open) => !open)}
+              >
+                <Sparkles />
+              </IconButton>
+            )}
             {status.connected ? (
               <>
                 {syncing && (
@@ -567,14 +570,16 @@ export default function App() {
         </div>
       </SidebarInset>
 
-      <HealthAssistant
-        open={assistantOpen}
-        data={data}
-        page={page}
-        archiveDays={effectiveArchive}
-        onOpenChange={setAssistantOpen}
-        onNavigate={navigateFromAssistant}
-      />
+      {!__WEB_TARGET__ && (
+        <HealthAssistant
+          open={assistantOpen}
+          data={data}
+          page={page}
+          archiveDays={effectiveArchive}
+          onOpenChange={setAssistantOpen}
+          onNavigate={navigateFromAssistant}
+        />
+      )}
 
       <SettingsDialog
         open={settingsOpen}
@@ -793,7 +798,7 @@ function SettingsDialog({
     const url = provider === 'google-health'
       ? 'https://console.cloud.google.com/apis/library/health.googleapis.com'
       : 'https://dev.fitbit.com/apps/new'
-    if (window.fitbit) void window.fitbit.openExternal(url)
+    if (fitbitBridge) void fitbitBridge.openExternal(url)
     else window.open(url, '_blank', 'noopener,noreferrer')
   }
 
@@ -803,7 +808,9 @@ function SettingsDialog({
         <DialogHeader>
           <div className="dialog-icon"><CloudIcon /></div>
           <DialogTitle>{status.connected && !editing ? `${providerLabel} connected` : `Connect ${providerLabel}`}</DialogTitle>
-          <DialogDescription>Your credentials and data remain encrypted on this computer.</DialogDescription>
+          <DialogDescription>{__WEB_TARGET__
+            ? 'Your session stays in an encrypted, server-side cookie. No health data is stored on a server.'
+            : 'Your credentials and data remain encrypted on this computer.'}</DialogDescription>
         </DialogHeader>
 
         {status.connected && !editing ? (
@@ -812,10 +819,21 @@ function SettingsDialog({
             <div><h3>Sync active</h3><p>Last updated {relativeTime(status.lastSyncAt)}.</p></div>
             <div className="connected-actions">
               <Button onClick={onConnect} disabled={connecting}>{connecting ? <LoaderCircle className="spin" /> : <RefreshCw />} Reauthorize</Button>
-              <Button variant="outline" onClick={() => setEditing(true)}><SettingsIcon /> Edit configuration</Button>
+              {!__WEB_TARGET__ && <Button variant="outline" onClick={() => setEditing(true)}><SettingsIcon /> Edit configuration</Button>}
               <Button variant="outline" onClick={() => void onExport()}><ExportIcon /> Export data</Button>
-              <Button variant="destructive" onClick={() => void onDisconnect()}><DisconnectIcon /> Disconnect and delete local data</Button>
+              <Button variant="destructive" onClick={() => void onDisconnect()}><DisconnectIcon /> {__WEB_TARGET__ ? 'Disconnect and clear this session' : 'Disconnect and delete local data'}</Button>
             </div>
+          </div>
+        ) : __WEB_TARGET__ ? (
+          <div className="connected-state">
+            <div><h3>Read-only access</h3><p>You will be redirected to Google to grant read-only access to your activity, heart, sleep, and body measurements.</p></div>
+            <div className="connected-actions">
+              <Button onClick={onConnect} disabled={connecting || !status.configured}>{connecting ? <LoaderCircle className="spin" /> : <CloudIcon />} Connect Google Health</Button>
+            </div>
+            {!status.configured && (
+              <p className="scope-note">The server is missing its Google OAuth configuration. Set <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> and restart it.</p>
+            )}
+            <div className="scope-note"><ShieldIcon /><p>Read-only permissions for activity, heart, sleep, and authorized measurements.</p></div>
           </div>
         ) : (
           <form onSubmit={submit} className="settings-form">
@@ -859,11 +877,20 @@ function SettingsDialog({
         <Separator className="settings-separator" />
         <DataModeSettings mode={dataModePreference} canUseLive={dataMode.canUseLive} onChange={onDataModeChange} />
 
-        <Separator className="settings-separator" />
-        <AssistantProviderSettings />
+        {!__WEB_TARGET__ && (
+          <>
+            <Separator className="settings-separator" />
+            <AssistantProviderSettings />
+          </>
+        )}
 
-        <Separator className="settings-separator" />
-        <AppVersionNote />
+        {/* The web app has no manual install: it serves whatever is deployed. */}
+        {!__WEB_TARGET__ && (
+          <>
+            <Separator className="settings-separator" />
+            <AppVersionNote />
+          </>
+        )}
       </DialogContent>
     </Dialog>
   )
@@ -877,7 +904,7 @@ function SettingsDialog({
 function AppVersionNote() {
   const openReleases = () => {
     const url = 'https://github.com/gadots/healthtracker/releases'
-    if (window.fitbit) void window.fitbit.openExternal(url)
+    if (fitbitBridge) void fitbitBridge.openExternal(url)
     else window.open(url, '_blank', 'noopener,noreferrer')
   }
 

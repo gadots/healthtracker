@@ -31,6 +31,26 @@ flowchart LR
     Manager -->|"JSONL stdio, read-only sandbox"| Codex["Codex app-server"]
 ```
 
+## Web Target
+
+The same renderer also ships as a hosted SPA backed by a stateless BFF in
+`server/` (see `WEB_DEPLOYMENT.md`). `src/lib/bridge.ts` picks the backend at
+startup: `window.fitbit` from the preload under Electron, or an HTTP-backed
+implementation of the same `FitbitBridge` contract in the browser. Every view,
+`normalizeFitbitData`, and the whole `src/lib` layer are shared unchanged.
+
+The web target drops what cannot exist in a browser: the Fitbit legacy provider,
+and the AI assistant (both adapters spawn local CLI binaries, so
+`vite.config.ts` aliases the component to a stub in `--mode web` and
+`@assistant-ui/react` never enters the bundle).
+
+Persistence differs by design. The desktop app keeps an encrypted per-day
+archive on disk; the web app keeps **nothing** server-side — a sealed cookie
+holds only the Google refresh token, and health payloads live in the requesting
+tab's `sessionStorage`. `server/` reuses `electron/google-health-service.cjs`
+verbatim and re-implements the parts of `main.cjs` that are Electron-coupled
+(the OAuth callback, token refresh, and the sync quality gate).
+
 ## Security Boundaries
 
 ### Main Process
@@ -159,7 +179,7 @@ The dashboard can show either the user's own measurements or locally generated s
 
 ## Public Distribution Note
 
-The documented Google Health client is a Web client and uses a Client Secret. `safeStorage` protects it on the user's computer, but a secret distributed inside a desktop app is not a true global secret. To distribute OpenFit to third parties, move the OAuth exchange to a minimal backend, complete Google verification, and complete the required security review. The current setup is appropriate for personal use and development.
+The documented Google Health client is a Web client and uses a Client Secret. `safeStorage` protects it on the user's computer, but a secret distributed inside a desktop app is not a true global secret. The web target in `server/` is that minimal backend: the OAuth exchange happens server-side and the secret never leaves the process. Distributing to third parties still requires Google verification and the security review that sensitive health scopes demand — until then the project stays in *Testing* mode, where refresh tokens expire after seven days. The current setup is appropriate for personal use and development.
 
 ## Fork Audit Notes
 

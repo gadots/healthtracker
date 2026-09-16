@@ -76,8 +76,9 @@ The desktop application can replace the browsing and analysis experience, but it
 
 # Part 2 — Getting started
 
-There are two ways to get OpenFit: download an installer, or run it from source. Downloading is
-the normal path — you only need the source route if you intend to change the code.
+There are three ways to run OpenFit: download the macOS installer, run the desktop app from
+source, or host it as a web app. Downloading is the normal path — take the source route if you
+intend to change the code, and the web route if you want the dashboard in a browser.
 
 ## Install on macOS
 
@@ -139,8 +140,10 @@ Useful commands:
 
 ```bash
 npm run build       # Type-check and bundle the renderer
-npm test            # Run normalizer and adapter tests
-npm run check        # typecheck + electron syntax check + tests + build
+npm run build:web   # Bundle the hosted web app into dist-web/
+npm start           # Serve the web app (static SPA + stateless API)
+npm test            # Run normalizer, adapter, and server tests
+npm run check       # typecheck + syntax checks + tests + both builds
 npm run capture:ui  # Run desktop/mobile visual QA in Electron Chromium
 npm run dist        # Package the app for macOS, Windows, or Linux
 ```
@@ -149,6 +152,29 @@ npm run dist        # Package the app for macOS, Windows, or Linux
 certificate is available in the Keychain. Published releases are built the same way by
 `.github/workflows/release.yml` whenever a `v*` tag is pushed; see
 [docs/RELEASE.md](docs/RELEASE.md).
+
+## Run it as a web app
+
+The same dashboard also runs as a hosted web app, with no database: a small
+stateless server handles the OAuth exchange and proxies Google Health reads,
+keeping the session in an encrypted cookie. Health data is fetched on demand and
+never stored server-side.
+
+```bash
+cp .env.example .env          # Google client id/secret + a 32-byte SESSION_SECRET
+npm run build:web && npm start
+```
+
+To try it without Google credentials:
+
+```bash
+MOCK_HEALTH=1 SESSION_SECRET=$(openssl rand -hex 32) npm start
+```
+
+The web target supports Google Health only, and does not include the AI
+assistant — both assistant adapters drive local CLI binaries, which a browser
+cannot do. See [Web deployment](docs/WEB_DEPLOYMENT.md) for setup, security
+notes, and known limits.
 
 ## Connect Google Health
 
@@ -310,6 +336,14 @@ electron/
   text-sanitize.cjs           Shared redaction for error/log text
   google-health-service.cjs   Google Health API v4 provider
   fitbit-legacy-service.cjs   Legacy Fitbit Web API provider with PKCE
+server/
+  index.mjs                   Web app: static hosting, routing, CSP (Node builtins only)
+  config.mjs                  Environment validation, session key
+  session.mjs                 AES-256-GCM cookie sealing
+  routes/auth.mjs             OAuth start, callback, status, disconnect
+  routes/sync.mjs             Authenticated sync proxy
+  health-sync.mjs             Sync quality gate ported from main.cjs
+  mock-provider.mjs           Generated data for credential-free local runs
 src/
   components/                 Views, charts, and assistant-ui chat
   data/                       Demo data and provider-independent normalization
@@ -317,6 +351,7 @@ src/
   lib/data-mode.ts            Resolves live vs demo into one labelled state
   lib/preferences.ts          Persists the live/demo choice
   lib/home-analysis.ts        Personal-baseline comparisons and daily headline
+  lib/bridge.ts               Picks the data backend: preload IPC or the web BFF
   lib/                        Formatting and pure utilities
   App.tsx                     UI, connection-state, and Settings orchestration
   types.ts                    Shared renderer/preload contracts
@@ -327,6 +362,7 @@ docs/
   DERIVED_SCORES.md           Formulas, inputs, and availability of each score
   DATA_COVERAGE.md            Data coverage and limitations
   GOOGLE_HEALTH_SETUP.md      Extended OAuth setup guide
+  WEB_DEPLOYMENT.md           Hosting the web app: BFF, cookies, limits
   RELEASE.md                  Signing, notarization, and release process
 ```
 

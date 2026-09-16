@@ -1080,6 +1080,22 @@ export function BodyView({ data }: ViewProps) {
   )
 }
 
+function storageHeadline(encrypted: boolean) {
+  if (__WEB_TARGET__) return encrypted ? 'No health data stored' : 'Session unavailable'
+  return encrypted ? 'Encrypted local storage' : 'Local encryption unavailable'
+}
+
+function storageDetail(encrypted: boolean) {
+  if (__WEB_TARGET__) {
+    return encrypted
+      ? 'Your sign-in stays in an encrypted, server-side cookie. Health data is fetched on demand and kept only in this browser tab.'
+      : 'Demo data does not contain personal health information. Connect Google Health to load your own.'
+  }
+  return encrypted
+    ? 'Credentials and health cache are protected by the operating system keychain.'
+    : 'Demo data does not contain personal health information; connect the Electron app to use the system vault.'
+}
+
 function CoverageRow({ icon: Icon, label, items }: { icon: AppIcon; label: string; items: string[] }) {
   return (
     <div className="coverage-row">
@@ -1141,8 +1157,8 @@ export function DevicesView({ data, status, dataMode }: ViewProps) {
           <div className={`privacy-card ${status.storageEncrypted ? '' : 'is-warning'}`}>
             <ShieldIcon aria-hidden="true" />
             <div>
-              <strong>{status.storageEncrypted ? 'Encrypted local storage' : 'Local encryption unavailable'}</strong>
-              <p>{status.storageEncrypted ? 'Credentials and health cache are protected by the operating system keychain.' : 'Demo data does not contain personal health information; connect the Electron app to use the system vault.'}</p>
+              <strong>{storageHeadline(status.storageEncrypted)}</strong>
+              <p>{storageDetail(status.storageEncrypted)}</p>
             </div>
           </div>
         </div>

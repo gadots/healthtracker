@@ -10,6 +10,9 @@ declare global {
     fitbit?: FitbitBridge
     healthAssistant?: HealthAssistantBridge
   }
+
+  /** Injected by vite `define`. True only in the hosted web build. */
+  const __WEB_TARGET__: boolean
 }
 
 export {}
