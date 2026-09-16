@@ -136,6 +136,29 @@ syncData(accessToken, date, onProgress)
 
 The main process selects the adapter from `config.provider`. The UI always receives the same `RawFitbitPayload` contract, then `normalizeFitbitData` converts it into `DashboardData`.
 
+## Derived Scores
+
+On top of the normalized raw measurements, `src/lib/scores.ts` computes a small set of OpenFit-original composite estimates — Recovery, Day Strain, Sleep Performance, Sleep Need/Debt/Consistency, a personalized Max Heart Rate, daily heart-rate zones, and a Health Monitor panel that flags last night's vitals against the user's own typical range.
+
+Design rules, all enforced in that one module:
+
+- **Renderer-side pure functions.** Same convention as `src/lib/home-analysis.ts`: no network, no IPC, no side effects, unit tested against `createDemoData()` fixtures in `src/lib/scores.test.ts`. Nothing new was added to the Electron main process or the preload bridge for this.
+- **Two history sources, used deliberately.** `data.trends` (the 14-day window embedded in every sync payload) backs the baseline comparisons and sleep debt so they work on a fresh install; the locally cached encrypted archive (`archiveDays`, loaded once in `src/App.tsx` via the shared `normalizeHealthArchive` helper and threaded into views) is used only where `TrendPoint` genuinely lacks the field — max heart rate, intraday zones/strain, and sleep start/end times.
+- **Hidden, never guessed.** Every score has a minimum-sample-size gate and returns `null` below it, which the views and the assistant context both treat as "omit this card/field" — matching OpenFit's existing "no empty cards" principle.
+- **Not a manufacturer's algorithm.** These are documented, deliberately simple OpenFit formulas over signals Google Health already provides, carrying an explicit estimate label in the UI and a disclaimer in the assistant context. `docs/DERIVED_SCORES.md` documents each formula, its inputs, and its availability gate; `docs/HOME_DASHBOARD_MODEL.md` records why the original "no composite score" rule was amended to allow them.
+
+The scores also flow into the AI assistant automatically: `buildHealthAssistantContext` includes them under `derivedScores`, so Claude or Codex can explain them from the same numbers the UI shows without any assistant-side changes.
+
+## Data Mode (live vs demo)
+
+The dashboard can show either the user's own measurements or locally generated sample data, and always says which.
+
+- **Preference vs provenance.** `DataModePreference` (`'live' | 'demo'`) is what the user chose; `DashboardData.source` stays the honest provenance of the payload on screen. They are kept separate rather than overloading one field: choosing demo makes App render `createDemoData(...)`, whose `source` is already `'demo'`, so every existing `source === 'demo'` check remains correct and the two can never contradict each other. `resolveDataMode` (`src/lib/data-mode.ts`) is the single place that turns preference plus connection state into the label, tone and detail every indicator uses, so the top-bar badge, the sidebar label and the Devices card cannot drift apart.
+- **Forced demo is real.** Demo can be selected *while an account is connected*, to test or demo the app without exposing real data. Three guards keep that honest: `changeDate`, `runSync` and `loadNativeState` in `src/App.tsx` all check the mode (via a ref, since they run from async callbacks) so a forced-demo session never issues a provider request or lets a cached payload overwrite the screen. Export keeps refusing synthetic data; only its wording adapts.
+- **Persistence.** The preference lives in `localStorage` (`src/lib/preferences.ts`), not in the encrypted `safeStorage` store used for OAuth tokens: it is a two-value display preference that reveals nothing, and it must work in the plain browser dev server where the IPC bridge does not exist. Every access is exception-guarded with an in-memory fallback, because the packaged app loads over `file://`. CSP is unaffected: `default-src 'self'` governs resource fetching, not Web Storage.
+- **Demo archive.** `createDemoArchive` produces the 14 prior days with the same "oldest first" contract as the real encrypted archive, so demo exercises the archive-dependent derived scores exactly as live data does. App selects between the demo and real archive on the *provenance of the rendered payload*, so the day and its history can never briefly disagree while the switch is flipping.
+- **The assistant is told.** The context carries an explicit `dataMode` field and prefixes the derived-scores disclaimer with a synthetic-data warning in demo, so the model cannot present sample numbers as facts about the user's health. `HealthAssistant` now receives the same `archiveDays` the dashboard renders instead of re-reading the archive over IPC, which removes a duplicate read and a source of divergence.
+
 ## Resilience
 
 - API reads are independent. A 403 or 404 response for ECG or temperature does not cancel steps and sleep.

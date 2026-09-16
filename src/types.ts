@@ -4,6 +4,9 @@ export type DataSource = 'demo' | 'fitbit' | 'google-health' | 'cache'
 
 export type HealthProvider = 'google-health' | 'fitbit-legacy'
 
+/** User's persisted choice of what the dashboard should show. `demo` is honoured even while an account is connected. */
+export type DataModePreference = 'live' | 'demo'
+
 export interface TimePoint {
   time: string
   value: number
@@ -77,6 +80,14 @@ export interface SleepStageCounts {
   light: number | null
   rem: number | null
   wake: number | null
+}
+
+export interface NapItem {
+  id: string
+  date: string
+  startTime: string
+  endTime: string
+  durationMinutes: number
 }
 
 export interface DashboardData {
@@ -157,6 +168,7 @@ export interface DashboardData {
     minutesAfterWakeUp: number | null
     timeInBed: number | null
     minutesAwake: number | null
+    naps: NapItem[]
   }
   body: {
     weightKg: number | null

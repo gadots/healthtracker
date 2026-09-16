@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { ChevronsUpDown, LoaderCircle, RefreshCw, Sparkles } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -31,11 +32,13 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import type { AssistantProviderDescriptor, AssistantProviderId, DashboardData, FitbitAuthStatus, FitbitConfigInput, HealthAssistantStatus, HealthProvider, PageId } from '@/types'
-import { createDemoData, localIso } from '@/data/demo'
-import { normalizeFitbitData } from '@/data/normalize'
+import type { AssistantProviderDescriptor, AssistantProviderId, DashboardData, DataModePreference, FitbitAuthStatus, FitbitConfigInput, HealthAssistantStatus, HealthProvider, PageId } from '@/types'
+import { createDemoArchive, createDemoData, localIso } from '@/data/demo'
+import { normalizeFitbitData, normalizeHealthArchive } from '@/data/normalize'
 import { formatDate, relativeTime } from '@/lib/format'
 import { fitbitBridge, isElectron } from '@/lib/bridge'
+import { resolveDataMode, type DataModeState } from '@/lib/data-mode'
+import { readDataModePreference, writeDataModePreference } from '@/lib/preferences'
 import { cn } from '@/lib/utils'
 import { ActivityView, BodyView, DevicesView, HealthView, SleepView, TodayView } from '@/components/Views'
 import { HealthAssistant } from '@/components/HealthAssistant'
@@ -117,6 +120,7 @@ export default function App() {
   const [page, setPage] = useState<PageId>('today')
   const [selectedDate, setSelectedDate] = useState(localIso())
   const [data, setData] = useState<DashboardData>(() => createDemoData())
+  const [archiveDays, setArchiveDays] = useState<DashboardData[]>([])
   const [status, setStatus] = useState(defaultStatus)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [assistantOpen, setAssistantOpen] = useState(false)
@@ -125,7 +129,12 @@ export default function App() {
   const [connecting, setConnecting] = useState(false)
   const [syncProgress, setSyncProgress] = useState<SyncProgressState | null>(null)
   const [toast, setToast] = useState<ToastState | null>(null)
+  const [dataModePreference, setDataModePreference] = useState<DataModePreference>(() => readDataModePreference())
   const selectedDateRef = useRef(selectedDate)
+  // Mirrored in a ref because runSync/changeDate are reachable from async
+  // callbacks holding stale closures, and a forced-demo session must never
+  // fall through to a real network sync.
+  const dataModeRef = useRef(dataModePreference)
   const dataDateRef = useRef(data.selectedDate)
   const syncingRef = useRef(false)
   const syncTargetDateRef = useRef<string | null>(null)
@@ -143,12 +152,17 @@ export default function App() {
     dataDateRef.current = data.selectedDate
   }, [data.selectedDate])
 
+  useEffect(() => {
+    dataModeRef.current = dataModePreference
+  }, [dataModePreference])
+
   const loadNativeState = useCallback(async () => {
     if (!fitbitBridge) return
     try {
       const [nextStatus, cached] = await Promise.all([fitbitBridge.getStatus(), fitbitBridge.getCachedData()])
       setStatus(nextStatus)
-      if (cached) {
+      // In demo mode the cached payload must not replace what is on screen.
+      if (cached && dataModeRef.current !== 'demo') {
         const normalized = normalizeFitbitData(cached)
         dataDateRef.current = normalized.selectedDate
         selectedDateRef.current = normalized.selectedDate
@@ -160,7 +174,23 @@ export default function App() {
     }
   }, [])
 
+  // Multi-day history behind the derived scores (Recovery, Strain, Sleep
+  // Need/Debt/Consistency): the same encrypted local archive the assistant
+  // panel already reads, normalized once here and threaded into the views.
+  const refreshArchive = useCallback(async () => {
+    if (!fitbitBridge) return
+    try {
+      setArchiveDays(normalizeHealthArchive(await fitbitBridge.getCachedArchive()))
+    } catch {
+      // Keep whatever history we already have; derived scores just fall
+      // back to fewer sample days until the next successful refresh.
+    }
+  }, [])
+
   const runSync = useCallback(async (requestedDate?: string) => {
+    // Reachable from onAuthComplete and assistant navigation, not just the
+    // refresh button, so the demo guard lives here rather than at call sites.
+    if (dataModeRef.current === 'demo') return
     if (!fitbitBridge) {
       setSettingsOpen(true)
       return
@@ -202,6 +232,7 @@ export default function App() {
           }
 
           void fitbitBridge.getStatus().then(setStatus).catch(() => undefined)
+          if (!payload.cacheHit) void refreshArchive()
         } catch (error) {
           const queuedDate = queuedDateRef.current
           const failedDateIsStillSelected = selectedDateRef.current === date
@@ -226,10 +257,11 @@ export default function App() {
       setSyncTargetDate(null)
       setSyncProgress(null)
     }
-  }, [])
+  }, [refreshArchive])
 
   useEffect(() => {
     void loadNativeState()
+    void refreshArchive()
     if (!fitbitBridge) return
     const unsubscribeAuth = fitbitBridge.onAuthComplete(async (result) => {
       setConnecting(false)
@@ -254,7 +286,7 @@ export default function App() {
       unsubscribeAuth()
       unsubscribeSync()
     }
-  }, [loadNativeState, runSync])
+  }, [loadNativeState, refreshArchive, runSync])
 
   useEffect(() => {
     if (!toast) return
@@ -265,17 +297,57 @@ export default function App() {
 
   const visibleNav = navItems
 
+  const dataMode = resolveDataMode({
+    preference: dataModePreference,
+    connected: status.connected,
+    provider: status.provider,
+    source: data.source,
+  })
+
+  // Demo ships a real 14-day archive so every archive-dependent derived score
+  // (Sleep Consistency, Weekly Assessment, a refined Max HR) is verifiable
+  // without connecting an account.
+  const demoArchive = useMemo(() => createDemoArchive(data.selectedDate), [data.selectedDate])
+  // Selected on the provenance of the payload actually rendered rather than on
+  // the preference, so the day and its history can never briefly disagree
+  // during the render between flipping the switch and regenerating `data`.
+  const effectiveArchive = data.source === 'demo' ? demoArchive : archiveDays
+
   const changeDate = (date: string) => {
     if (!date || date > localIso()) return
     selectedDateRef.current = date
     setSelectedDate(date)
-    if (data.source === 'demo' && !status.connected) {
+    // Keyed on the resolved mode, not on `status.connected`: under forced
+    // demo the account IS connected, and falling through here would sync
+    // real data behind the user's back.
+    if (dataMode.mode === 'demo') {
       const demoData = createDemoData(date)
       dataDateRef.current = demoData.selectedDate
       setData(demoData)
       return
     }
     if (status.connected) void runSync(date)
+  }
+
+  const changeDataMode = (next: DataModePreference) => {
+    if (next === dataModePreference) return
+    writeDataModePreference(next)
+    dataModeRef.current = next
+    setDataModePreference(next)
+    if (next === 'demo') {
+      const demoData = createDemoData(selectedDateRef.current)
+      dataDateRef.current = demoData.selectedDate
+      setData(demoData)
+      setToast({ tone: 'neutral', message: 'Showing demo data. Live sync is paused.' })
+      return
+    }
+    if (status.connected) {
+      void runSync(selectedDateRef.current)
+      void refreshArchive()
+    } else {
+      void loadNativeState()
+    }
+    setToast({ tone: 'neutral', message: 'Back to live data.' })
   }
 
   const connect = async () => {
@@ -317,14 +389,21 @@ export default function App() {
     if (!fitbitBridge) return
     setStatus(await fitbitBridge.disconnect())
     setData(createDemoData(selectedDate))
+    setArchiveDays([])
     setSettingsOpen(false)
     setPage('today')
     setToast({ tone: 'success', message: 'Account disconnected and local data removed.' })
   }
 
   const exportData = async () => {
+    // Keeps refusing to export synthetic data; only the wording adapts.
     if (!fitbitBridge || data.source === 'demo') {
-      setToast({ tone: 'neutral', message: 'Connect Google Health to export real data.' })
+      setToast({
+        tone: 'neutral',
+        message: dataMode.forced
+          ? 'Switch to Live data in Settings to export your real archive.'
+          : 'Connect Google Health to export real data.',
+      })
       return
     }
     const result = await fitbitBridge.exportData()
@@ -332,19 +411,17 @@ export default function App() {
   }
 
   const currentView = useMemo(() => {
-    const props = { data, status, navigate: setPage }
+    const props = { data, status, navigate: setPage, archiveDays: effectiveArchive, dataMode }
     if (page === 'activity') return <ActivityView {...props} />
     if (page === 'health') return <HealthView {...props} />
     if (page === 'sleep') return <SleepView {...props} />
     if (page === 'body') return <BodyView {...props} />
     if (page === 'devices') return <DevicesView {...props} />
     return <TodayView {...props} />
-  }, [data, page, status])
+  }, [dataMode, effectiveArchive, data, page, status])
 
   const isToday = selectedDate === localIso()
-  const sourceLabel = status.connected
-    ? status.provider === 'fitbit-legacy' ? 'Fitbit legacy' : 'Google Health'
-    : data.source === 'demo' ? 'Demo data' : 'Local cache'
+  const sourceLabel = dataMode.label
   const pageMeta = navItems.find((item) => item.id === page) ?? navItems[0]
   const loadingSelectedDate = syncing && data.selectedDate !== selectedDate
   const selectedDateQueued = loadingSelectedDate && syncTargetDate !== null && syncTargetDate !== selectedDate
@@ -398,6 +475,15 @@ export default function App() {
           </div>
 
           <div className="topbar-actions">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge variant="secondary" className={cn('data-mode-badge', `is-${dataMode.tone}`)} role="status">
+                  <span className={cn('status-dot', dataMode.tone === 'live' && 'online')} aria-hidden="true" />
+                  <span>{dataMode.label}</span>
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent>{dataMode.detail}</TooltipContent>
+            </Tooltip>
             <div className="date-control">
               <IconButton label="Previous day" onClick={() => changeDate(shiftDate(selectedDate, -1))}><ChevronLeftIcon /></IconButton>
               <label className="date-picker">
@@ -489,6 +575,7 @@ export default function App() {
           open={assistantOpen}
           data={data}
           page={page}
+          archiveDays={effectiveArchive}
           onOpenChange={setAssistantOpen}
           onNavigate={navigateFromAssistant}
         />
@@ -498,6 +585,9 @@ export default function App() {
         open={settingsOpen}
         status={status}
         connecting={connecting}
+        dataMode={dataMode}
+        dataModePreference={dataModePreference}
+        onDataModeChange={changeDataMode}
         onOpenChange={setSettingsOpen}
         onSave={saveAndConnect}
         onConnect={connect}
@@ -649,6 +739,9 @@ function SettingsDialog({
   open,
   status,
   connecting,
+  dataMode,
+  dataModePreference,
+  onDataModeChange,
   onOpenChange,
   onSave,
   onConnect,
@@ -658,6 +751,9 @@ function SettingsDialog({
   open: boolean
   status: FitbitAuthStatus
   connecting: boolean
+  dataMode: DataModeState
+  dataModePreference: DataModePreference
+  onDataModeChange: (mode: DataModePreference) => void
   onOpenChange: (open: boolean) => void
   onSave: (config: FitbitConfigInput) => Promise<void>
   onConnect: () => Promise<void>
@@ -778,14 +874,95 @@ function SettingsDialog({
           </form>
         )}
 
+        <Separator className="settings-separator" />
+        <DataModeSettings mode={dataModePreference} canUseLive={dataMode.canUseLive} onChange={onDataModeChange} />
+
         {!__WEB_TARGET__ && (
           <>
             <Separator className="settings-separator" />
             <AssistantProviderSettings />
           </>
         )}
+
+        {/* The web app has no manual install: it serves whatever is deployed. */}
+        {!__WEB_TARGET__ && (
+          <>
+            <Separator className="settings-separator" />
+            <AppVersionNote />
+          </>
+        )}
       </DialogContent>
     </Dialog>
+  )
+}
+
+/**
+ * OpenFit ships without auto-update, so the installed version has to be legible
+ * from inside the app: it is the only way to tell a current build from a stale
+ * one before downloading a new disk image.
+ */
+function AppVersionNote() {
+  const openReleases = () => {
+    const url = 'https://github.com/gadots/healthtracker/releases'
+    if (fitbitBridge) void fitbitBridge.openExternal(url)
+    else window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  return (
+    <div className="version-note">
+      <p>OpenFit <strong>{__APP_VERSION__}</strong> · updates are installed manually.</p>
+      <button type="button" className="portal-link" onClick={openReleases}>Check for a newer release <ExternalIcon /></button>
+    </div>
+  )
+}
+
+/**
+ * Presentational on purpose: unlike AssistantProviderSettings, which fetches
+ * its own state, the dashboard and this switch have to move together, so App
+ * owns the state and passes it down.
+ */
+function DataModeSettings({
+  mode,
+  canUseLive,
+  onChange,
+}: {
+  mode: DataModePreference
+  canUseLive: boolean
+  onChange: (mode: DataModePreference) => void
+}) {
+  return (
+    <div className="assistant-settings">
+      <h3>Data source</h3>
+      <div className="provider-picker" role="radiogroup" aria-label="Data source">
+        <label className={cn(mode === 'live' && 'active', !canUseLive && 'is-disabled')}>
+          <input
+            className="sr-only"
+            type="radio"
+            name="data-mode"
+            value="live"
+            checked={mode === 'live'}
+            disabled={!canUseLive}
+            onChange={() => onChange('live')}
+          />
+          <CloudIcon /><span><strong>Live data</strong><small>{canUseLive ? 'Your own measurements' : 'Connect a provider first'}</small></span>{mode === 'live' && <CheckIcon />}
+        </label>
+        <label className={cn(mode === 'demo' && 'active')}>
+          <input
+            className="sr-only"
+            type="radio"
+            name="data-mode"
+            value="demo"
+            checked={mode === 'demo'}
+            onChange={() => onChange('demo')}
+          />
+          <SparkleIcon /><span><strong>Demo data</strong><small>Sample data for testing</small></span>{mode === 'demo' && <CheckIcon />}
+        </label>
+      </div>
+      <div className="scope-note">
+        <ShieldIcon />
+        <p>Demo data is generated locally and is not your own. Your account stays connected while demo is selected — live sync is simply paused, and exports stay disabled so sample data can never be mistaken for real measurements.</p>
+      </div>
+    </div>
   )
 }
 

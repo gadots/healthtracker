@@ -70,18 +70,27 @@
       "dist/**/*",
       "electron/**/*.cjs",
       "build/icon.png",
-      "package.json"
+      "package.json",
+      "!node_modules/**/*"
     ],
     "directories": {
       "output": "release"
     },
     "mac": {
       "category": "public.app-category.healthcare-fitness",
-      "hardenedRuntime": true,
+      "hardenedRuntime": false,
       "target": [
-        "dmg",
-        "zip"
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
       ]
+    },
+    "dmg": {
+      "artifactName": "${productName}-${version}-${arch}.dmg"
     },
     "win": {
       "target": "nsis"

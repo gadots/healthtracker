@@ -114,6 +114,21 @@ docker run -p 42814:42814 --env-file .env openfit-web
 - `SESSION_SECRET` must be a real 32-byte key; a short password is rejected at
   startup rather than silently stretched.
 
+## Derived scores on the web
+
+The derived scores behave slightly differently here, because they read a
+multi-day archive that the desktop app keeps encrypted on disk and the web app
+keeps in `sessionStorage` — which starts empty in every new tab.
+
+| Score | Web behaviour |
+|---|---|
+| Recovery, Day Strain, Sleep Performance, Sleep Debt, Sleep Need | Available from the first sync — they read `data.trends`, which carries 14 days in every payload. |
+| Sleep Consistency, Weekly Assessment, Max Heart Rate | Hidden until the tab has synced enough days, since they need sleep timestamps and readings that only the archive holds. |
+
+They fill in as you browse back through days. Pre-syncing a week on connect
+would fix it, but multiplies a 10–20 second sync by fourteen, so the scores stay
+honestly hidden instead.
+
 ## Known limits
 
 1. **Refresh tokens expire after 7 days while the Google project is in

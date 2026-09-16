@@ -427,10 +427,12 @@ function translateGoogleHealth(raw, selectedDate) {
   const selectedActivityLevels = selected(activeMinutes, selectedDate)
   const todayActivityLevels = selectedActivityLevels || {}
   const sleepRecords = dataPoints(raw.sleepRaw).map(toLegacySleep)
-  const selectedSleepRecords = sleepRecords.filter((item) => item.dateOfSleep === selectedDate)
-  const selectedSleep = selectedSleepRecords.find((item) => item.isMainSleep)
-    || selectedSleepRecords.sort((a, b) => b.minutesAsleep - a.minutesAsleep)[0]
-    || null
+  // Main sleep (if any) first, then naps longest-first. mainSleep() in
+  // normalize.ts picks index 0 when no record is flagged isMainSleep, so
+  // this ordering is what makes that fallback pick the longest nap.
+  const selectedSleepRecords = sleepRecords
+    .filter((item) => item.dateOfSleep === selectedDate)
+    .sort((a, b) => Number(b.isMainSleep) - Number(a.isMainSleep) || b.minutesAsleep - a.minutesAsleep)
   const allDates = [...new Set([
     ...steps.keys(),
     ...calories.keys(),
@@ -561,7 +563,10 @@ function translateGoogleHealth(raw, selectedDate) {
       'activities-heart': [{ dateTime: selectedDate, value: { restingHeartRate: selected(restingHeart, selectedDate) } }],
       'activities-heart-intraday': { dataset: heartPoints },
     },
-    sleep: { sleep: selectedSleep ? [selectedSleep] : [] },
+    // Include every sleep record for the selected date, not just the main
+    // one: naps carry `isMainSleep: false` and are extracted separately by
+    // the normalization layer (see normalize.ts's parseNaps).
+    sleep: { sleep: selectedSleepRecords },
     sleepTrend: { sleep: sleepRecords },
     sleepGoal: { goal: {} },
     stepsTrend: { 'activities-steps': allDates.map((date) => ({ dateTime: date, value: steps.get(date) })) },

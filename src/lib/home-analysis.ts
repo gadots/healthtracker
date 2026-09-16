@@ -6,6 +6,8 @@ export interface BaselineComparison {
   difference: number | null
   percentChange: number | null
   sampleCount: number
+  /** Population stddev of the lookback window, null with fewer than 2 samples. Used to flag a value as outside the personal typical range (see src/lib/scores.ts). */
+  stddev: number | null
 }
 
 export interface HomeAnalysis {
@@ -41,6 +43,12 @@ function mean(values: number[]) {
   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null
 }
 
+function stddev(values: number[], average: number | null) {
+  if (values.length < 2 || average === null) return null
+  const variance = values.reduce((sum, value) => sum + (value - average) ** 2, 0) / values.length
+  return Math.sqrt(variance)
+}
+
 function percentChange(current: number | null, baseline: number | null) {
   if (current === null || baseline === null || baseline === 0) return null
   return (current - baseline) / baseline * 100
@@ -63,6 +71,7 @@ export function compareWithPersonalBaseline(
     difference: current === null || baseline === null ? null : current - baseline,
     percentChange: percentChange(current, baseline),
     sampleCount: values.length,
+    stddev: stddev(values, baseline),
   }
 }
 
