@@ -93,6 +93,48 @@ MOCK_HEALTH=1 SESSION_SECRET=$(openssl rand -hex 32) npm start
 like a real Google sync, so the entire path — bridge, quality gate,
 normalization, every view — runs without network access.
 
+### Deploying to Fly.io
+
+`fly.toml` is committed; secrets are not, and must never be. From a checkout:
+
+```bash
+fly launch --no-deploy --copy-config --name <your-app-name>
+
+fly secrets set \
+  GOOGLE_CLIENT_ID=... \
+  GOOGLE_CLIENT_SECRET=... \
+  SESSION_SECRET="$(openssl rand -hex 32)" \
+  OAUTH_REDIRECT_URI=https://<your-app-name>.fly.dev/api/auth/callback
+
+fly deploy
+```
+
+Then add that same callback to the Google OAuth client's **Authorized redirect
+URIs**, alongside the desktop one — both can live on the one client:
+
+```text
+http://127.0.0.1:42813/oauth/callback                 ← desktop, keep
+https://<your-app-name>.fly.dev/api/auth/callback     ← add
+```
+
+`OAUTH_REDIRECT_URI` and the registered URI must match character for character,
+including the scheme and the `/api/auth/callback` path.
+
+Two notes on the config: `min_machines_running = 1` keeps a machine warm,
+because a cold start in the middle of a 10–20 second sync is a poor first
+impression; and `TRUST_PROXY=1` is required because Fly terminates TLS at the
+edge — without it the session cookie never gets its `Secure` attribute.
+
+### There is no application login
+
+The app authenticates you to *Google*; it has no account system of its own.
+Anyone who finds the URL sees the demo dashboard, and pressing connect sends
+them to their own Google account — which, while the Cloud project is in
+*Testing*, only returns data for accounts registered as test users. Each visitor
+gets their own cookie and their own data, so this is not a leak. If you would
+rather nobody else even sees the demo, put basic auth at the edge or keep the
+machine on a private network.
+
 Docker:
 
 ```bash

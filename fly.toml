@@ -1,0 +1,31 @@
+# Fly.io deployment for the OpenFit web app. Secrets are NOT set here — use
+# `fly secrets set` so they never reach the repository.
+#
+# Required secrets:
+#   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, SESSION_SECRET, OAUTH_REDIRECT_URI
+
+app = "openfit-web"
+primary_region = "mad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "42814"
+  HOST = "0.0.0.0"
+  # Fly terminates TLS at the edge, so trust x-forwarded-proto or the session
+  # cookie never gets its Secure attribute.
+  TRUST_PROXY = "1"
+
+[http_service]
+  internal_port = 42814
+  force_https = true
+  auto_stop_machines = false
+  # A sync is ~30 upstream requests over 10-20 seconds; a cold start in the
+  # middle of one is a bad first impression, so keep a machine warm.
+  min_machines_running = 1
+  processes = ["app"]
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
