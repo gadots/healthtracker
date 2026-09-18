@@ -6,9 +6,11 @@ import { fileURLToPath } from 'node:url'
 
 import { loadConfig } from './config.mjs'
 import { parseCookies, unseal, SESSION_COOKIE } from './session.mjs'
-import { sendJson } from './http.mjs'
+import { redirect, sendJson } from './http.mjs'
 import { registerAuthRoutes } from './routes/auth.mjs'
 import { registerSyncRoutes } from './routes/sync.mjs'
+import { registerGateRoutes } from './routes/gate.mjs'
+import { GATE_COOKIE, createAttemptLimiter, isUnlocked } from './gate.mjs'
 import { mockProvider } from './mock-provider.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -87,10 +89,19 @@ export async function createServer(config, provider) {
   const cookies = (request) => parseCookies(request.headers.cookie)
   const session = (request) => unseal(config.sessionKey, cookies(request)[SESSION_COOKIE])
 
+  const limiter = createAttemptLimiter()
+
   const routes = {
+    ...registerGateRoutes({ config, cookies, limiter }),
     ...registerAuthRoutes({ config, provider, cookies, session }),
     ...registerSyncRoutes({ config, provider, session }),
   }
+
+  // The only paths reachable without unlocking. Everything else — static files,
+  // /api/*, and the OAuth callback — sits behind the gate. The callback being
+  // gated is correct: the browser that started the flow already holds the
+  // cookie, which is why it must be SameSite=Lax to survive Google's redirect.
+  const PUBLIC_ROUTES = new Set(['GET /login', 'POST /login', 'POST /logout'])
 
   return http.createServer(async (request, response) => {
     const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`)
@@ -99,7 +110,19 @@ export async function createServer(config, provider) {
     const baseHeaders = securityHeaders(secure)
 
     try {
-      const handler = routes[`${request.method} ${url.pathname}`]
+      const route = `${request.method} ${url.pathname}`
+
+      if (config.gateEnabled && !PUBLIC_ROUTES.has(route) && !isUnlocked(config, cookies(request)[GATE_COOKIE])) {
+        // JSON for the API so the web bridge can react, a redirect for pages.
+        if (url.pathname.startsWith('/api/')) {
+          sendJson(response, 401, { message: 'Locked. Reload the page to unlock.', locked: true }, baseHeaders)
+        } else {
+          redirect(response, `/login?next=${encodeURIComponent(url.pathname + url.search)}`, baseHeaders)
+        }
+        return
+      }
+
+      const handler = routes[route]
       if (handler) {
         response.setHeader('content-security-policy', CSP)
         response.setHeader('x-content-type-options', 'nosniff')
@@ -130,6 +153,7 @@ async function main() {
   const server = await createServer(config, provider)
   server.listen(config.port, config.host, () => {
     console.log(`[openfit] listening on http://${config.host}:${config.port}${config.mockHealth ? ' (MOCK_HEALTH)' : ''}`)
+    console.log(`[openfit] access gate ${config.gateEnabled ? 'enabled' : 'DISABLED (ALLOW_NO_PASSPHRASE)'}`)
     console.log(`[openfit] oauth callback ${config.oauth.redirectUri}`)
   })
 }

@@ -29,7 +29,7 @@
     "check": "npm run typecheck && npm run check:electron && npm run check:server && npm test && npm run build && npm run build:web",
     "capture:ui": "electron scripts/capture-ui.cjs",
     "dist": "npm run build && electron-builder",
-    "check:server": "node --check server/index.mjs && node --check server/config.mjs && node --check server/session.mjs && node --check server/http.mjs && node --check server/health-sync.mjs && node --check server/mock-provider.mjs && node --check server/routes/auth.mjs && node --check server/routes/sync.mjs"
+    "check:server": "node --check server/index.mjs && node --check server/config.mjs && node --check server/session.mjs && node --check server/http.mjs && node --check server/health-sync.mjs && node --check server/mock-provider.mjs && node --check server/routes/auth.mjs && node --check server/routes/sync.mjs && node --check server/gate.mjs && node --check server/routes/gate.mjs"
   },
   "dependencies": {
     "@assistant-ui/react": "0.14.23",

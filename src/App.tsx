@@ -37,6 +37,7 @@ import { createDemoArchive, createDemoData, localIso } from '@/data/demo'
 import { normalizeFitbitData, normalizeHealthArchive } from '@/data/normalize'
 import { formatDate, relativeTime } from '@/lib/format'
 import { fitbitBridge, isElectron } from '@/lib/bridge'
+import { lockSession } from '@/lib/web-bridge'
 import { resolveDataMode, type DataModeState } from '@/lib/data-mode'
 import { readDataModePreference, writeDataModePreference } from '@/lib/preferences'
 import { cn } from '@/lib/utils'
@@ -891,6 +892,13 @@ function SettingsDialog({
             <AppVersionNote />
           </>
         )}
+
+        {__WEB_TARGET__ && (
+          <>
+            <Separator className="settings-separator" />
+            <LockDeviceNote />
+          </>
+        )}
       </DialogContent>
     </Dialog>
   )
@@ -962,6 +970,15 @@ function DataModeSettings({
         <ShieldIcon />
         <p>Demo data is generated locally and is not your own. Your account stays connected while demo is selected — live sync is simply paused, and exports stay disabled so sample data can never be mistaken for real measurements.</p>
       </div>
+    </div>
+  )
+}
+
+function LockDeviceNote() {
+  return (
+    <div className="version-note">
+      <p>Lock this browser and sign out of Google on this device.</p>
+      <Button variant="outline" onClick={() => lockSession()}><DisconnectIcon /> Lock and sign out</Button>
     </div>
   )
 }
