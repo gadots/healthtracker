@@ -125,15 +125,60 @@ because a cold start in the middle of a 10–20 second sync is a poor first
 impression; and `TRUST_PROXY=1` is required because Fly terminates TLS at the
 edge — without it the session cookie never gets its `Secure` attribute.
 
-### There is no application login
+### The access gate
 
-The app authenticates you to *Google*; it has no account system of its own.
-Anyone who finds the URL sees the demo dashboard, and pressing connect sends
-them to their own Google account — which, while the Cloud project is in
-*Testing*, only returns data for accounts registered as test users. Each visitor
-gets their own cookie and their own data, so this is not a leak. If you would
-rather nobody else even sees the demo, put basic auth at the edge or keep the
-machine on a private network.
+A passphrase sits in front of the whole deployment — static files, `/api/*`, the
+OAuth callback and the demo dashboard included. Without a valid gate cookie,
+pages redirect to `/login` and API routes return `401 {"locked": true}`, which
+the web bridge turns into a redirect rather than an opaque error.
+
+Set it as a Fly secret:
+
+```bash
+fly secrets set APP_PASSPHRASE="$(openssl rand -base64 24)"
+```
+
+The server **refuses to start** without `APP_PASSPHRASE`, and rejects anything
+under 12 characters, rather than quietly serving a health dashboard to the
+internet. For local development the escape hatch is explicit:
+`ALLOW_NO_PASSPHRASE=1`.
+
+The unlock page is rendered by the server, not the React bundle, so the gate
+closes before a line of app code loads. It is a plain HTML form with no
+JavaScript: it works with scripting disabled and offers no script surface.
+
+Four details that matter more than they look:
+
+- **The OAuth callback is gated too**, which is correct — the browser that
+  started the flow already holds the cookie. That is also why the gate cookie is
+  `SameSite=Lax`: `Strict` would drop it on the redirect back from Google and
+  break sign-in.
+- **Constant-time comparison.** Both sides are SHA-256'd before
+  `timingSafeEqual`, so the buffers are always equal length — passing raw
+  strings makes it throw on a mismatch, and that throw leaks the real length.
+- **`?next=` is validated.** Only a single-slash local path is honoured;
+  `https://evil.com`, `//evil.com` and `/\evil.com` all fall back to `/`, so the
+  unlock page cannot be used as an open redirect.
+- **Brute force is rate limited** per client address with exponential backoff,
+  plus a global ceiling so rotating addresses buys nothing. Proxy headers
+  (`fly-client-ip`, `x-forwarded-for`) are read only when `TRUST_PROXY` is on —
+  otherwise a forged header would let an attacker escape their own limit.
+
+An unlocked browser stays unlocked for `GATE_TTL_HOURS` (default 12), or 30 days
+with "Remember this device". Settings has a **Lock and sign out** action that
+clears the gate and the Google session together.
+
+### What the gate does not do
+
+It is a shared passphrase, not identity. Anyone holding it can reach the app and
+start an OAuth flow — but they would sign in as *themselves* and see *their own*
+Google data, never yours, which stays behind your own session cookie.
+
+If you later want the app itself to decide who may connect, the follow-up is an
+allowlist checked in `server/routes/auth.mjs` after the token exchange
+(`ALLOWED_GOOGLE_EMAILS`, which needs the `email` scope added). Today that rule
+lives in Google Cloud instead: while the project is in *Testing*, only
+registered test users receive data.
 
 Docker:
 

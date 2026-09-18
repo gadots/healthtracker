@@ -47,9 +47,24 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   })
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
+    // The access gate expired mid-session: send the browser to the unlock page
+    // rather than surfacing an opaque error behind a dashboard it cannot refresh.
+    if (response.status === 401 && (payload as { locked?: boolean }).locked) {
+      window.location.assign(`/login?next=${encodeURIComponent(window.location.pathname)}`)
+      throw new Error('Session locked. Redirecting to the unlock page…')
+    }
     throw new Error((payload as { message?: string }).message || `The server responded ${response.status}.`)
   }
   return payload as T
+}
+
+/** Ends the browser session: clears the gate and the Google session together. */
+export function lockSession() {
+  const form = document.createElement('form')
+  form.method = 'POST'
+  form.action = '/logout'
+  document.body.append(form)
+  form.submit()
 }
 
 function downloadJson(filename: string, value: unknown) {

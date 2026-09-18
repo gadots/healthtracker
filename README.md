@@ -165,10 +165,15 @@ cp .env.example .env          # Google client id/secret + a 32-byte SESSION_SECR
 npm run build:web && npm start
 ```
 
+A passphrase gate sits in front of the whole deployment, so the dashboard is
+never reachable by anyone who just finds the URL. The server refuses to start
+without `APP_PASSPHRASE`.
+
 To try it without Google credentials:
 
 ```bash
-MOCK_HEALTH=1 SESSION_SECRET=$(openssl rand -hex 32) npm start
+MOCK_HEALTH=1 SESSION_SECRET=$(openssl rand -hex 32) \
+  APP_PASSPHRASE=a-long-enough-passphrase npm start
 ```
 
 The web target supports Google Health only, and does not include the AI
@@ -342,6 +347,8 @@ server/
   session.mjs                 AES-256-GCM cookie sealing
   routes/auth.mjs             OAuth start, callback, status, disconnect
   routes/sync.mjs             Authenticated sync proxy
+  gate.mjs                    Passphrase gate: cookie, rate limit, unlock page
+  routes/gate.mjs             Unlock and lock endpoints
   health-sync.mjs             Sync quality gate ported from main.cjs
   mock-provider.mjs           Generated data for credential-free local runs
 src/
