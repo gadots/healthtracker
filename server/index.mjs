@@ -144,11 +144,11 @@ export async function createServer(config, provider) {
 
 async function main() {
   const config = loadConfig()
-  // The desktop adapter needs only `node:crypto` and global fetch, so it runs
-  // unchanged here.
+  // Same adapter the desktop app drives: `providers/` needs only `node:crypto`
+  // and global fetch, so it runs unchanged in a plain Node process.
   const provider = config.mockHealth
     ? mockProvider
-    : (await import('../electron/google-health-service.cjs')).default
+    : (await import('../providers/google-health.cjs')).default
 
   const server = await createServer(config, provider)
   server.listen(config.port, config.host, () => {

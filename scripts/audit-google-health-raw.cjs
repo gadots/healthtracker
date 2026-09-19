@@ -3,7 +3,7 @@
 const { app, safeStorage } = require('electron')
 const fs = require('node:fs')
 const path = require('node:path')
-const googleHealth = require('../electron/google-health-service.cjs')
+const googleHealth = require('../providers/google-health.cjs')
 
 app.setName('pulseboard-fitbit-desktop')
 

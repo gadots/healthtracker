@@ -1,5 +1,5 @@
 /**
- * Stand-in for `google-health-service.cjs` used when `MOCK_HEALTH=1`.
+ * Stand-in for `providers/google-health.cjs` used when `MOCK_HEALTH=1`.
  *
  * It emits the same legacy-Fitbit-shaped `RawFitbitPayload` that
  * `translateGoogleHealth()` produces, so the whole web path — bridge, sync

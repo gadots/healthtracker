@@ -1,8 +1,7 @@
 /**
  * Sync orchestration for the web app, ported from `electron/main.cjs`
- * (`syncData`, main.cjs:258-285). The provider adapter itself is reused
- * verbatim — `electron/google-health-service.cjs` only needs `node:crypto`
- * and global `fetch`, so it runs unchanged in a plain Node process.
+ * (`syncData`, main.cjs:258-285). The provider adapter in `providers/` is
+ * reused verbatim — both targets drive the same one.
  */
 
 /** Keys that carry an actual measurement, as opposed to profile/settings metadata. */
