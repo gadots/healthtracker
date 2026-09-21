@@ -9,11 +9,11 @@ RUN npm run build:web
 FROM node:22-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
-# The server imports electron/google-health-service.cjs directly; it needs only
-# node:crypto and global fetch, never Electron itself.
 COPY package.json ./
 COPY server ./server
-COPY electron/google-health-service.cjs ./electron/google-health-service.cjs
+# The provider adapters are shared with the desktop app and need only
+# node:crypto and global fetch, so they run in a plain Node process.
+COPY providers ./providers
 COPY --from=build /app/dist-web ./dist-web
 USER node
 EXPOSE 42814

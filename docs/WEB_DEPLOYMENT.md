@@ -38,8 +38,9 @@ Browser (static SPA)                   BFF (server/, stateless)         Google
   normalizeFitbitData() ──▶ DashboardData ──▶ views
 ```
 
-`server/` reuses `electron/google-health-service.cjs` unchanged — that module
-depends only on `node:crypto` and global `fetch`, never on Electron. The sync
+`server/` reuses `providers/google-health.cjs` unchanged. Everything in
+`providers/` depends only on `node:crypto` and global `fetch`, never on
+Electron, which is why both targets can drive the same adapters. The sync
 quality gate in `server/health-sync.mjs` is ported from `electron/main.cjs`.
 
 The server has **no third-party runtime dependencies**; it is Node builtins only.
@@ -229,7 +230,7 @@ honestly hidden instead.
 3. **Per-endpoint sync progress is not reported.** The BFF returns one response,
    so the UI shows an indeterminate spinner. Adding SSE would restore the
    detailed progress bar.
-4. **Fitbit legacy is desktop-only.** `electron/fitbit-legacy-service.cjs` is not
+4. **Fitbit legacy is desktop-only.** `providers/fitbit-legacy.cjs` is not
    wired into the web app.
 5. **Shared API quota.** All web users authenticate through one OAuth client, so
    they share its Google Health rate limit, and each must be a registered test

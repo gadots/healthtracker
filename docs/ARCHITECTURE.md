@@ -47,7 +47,7 @@ and the AI assistant (both adapters spawn local CLI binaries, so
 Persistence differs by design. The desktop app keeps an encrypted per-day
 archive on disk; the web app keeps **nothing** server-side — a sealed cookie
 holds only the Google refresh token, and health payloads live in the requesting
-tab's `sessionStorage`. `server/` reuses `electron/google-health-service.cjs`
+tab's `sessionStorage`. `server/` reuses `providers/google-health.cjs`
 verbatim and re-implements the parts of `main.cjs` that are Electron-coupled
 (the OAuth callback, token refresh, and the sync quality gate).
 

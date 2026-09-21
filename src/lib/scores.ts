@@ -305,7 +305,7 @@ export function computeRecoveryScore(data: DashboardData, sleepPerformance: Slee
 // --- Sleep Debt, dynamic Sleep Need & Sleep Consistency -------------------
 //
 // These use `data.trends` (the 14-day window already embedded in every
-// sync payload — see google-health-service.cjs's trendStart) rather than
+// sync payload — see trendStart in providers/google-health.cjs) rather than
 // the local archive: it is guaranteed present regardless of how many days
 // the user has actually opened, so debt/need stay available even on a
 // fresh install. Sleep Consistency is the one exception — TrendPoint has

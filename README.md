@@ -339,8 +339,9 @@ electron/
   claude-service.cjs          Read-only Claude Code CLI adapter (subscription auth)
   codex-service.cjs           Read-only Codex app-server JSONL client
   text-sanitize.cjs           Shared redaction for error/log text
-  google-health-service.cjs   Google Health API v4 provider
-  fitbit-legacy-service.cjs   Legacy Fitbit Web API provider with PKCE
+providers/                    Health providers, shared by both targets (plain Node)
+  google-health.cjs           Google Health API v4 provider
+  fitbit-legacy.cjs           Legacy Fitbit Web API provider with PKCE
 server/
   index.mjs                   Web app: static hosting, routing, CSP (Node builtins only)
   config.mjs                  Environment validation, session key

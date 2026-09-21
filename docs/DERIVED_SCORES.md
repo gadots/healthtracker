@@ -29,7 +29,7 @@ All of this logic lives in `src/lib/scores.ts` as pure functions, unit tested in
 
 Two different sources, deliberately:
 
-- **`data.trends`** — the 14-day window embedded in every sync payload (see `trendStart` in `electron/google-health-service.cjs`). Always present, so baseline comparisons, Sleep Debt, and Sleep Need work even on a fresh install.
+- **`data.trends`** — the 14-day window embedded in every sync payload (see `trendStart` in `providers/google-health.cjs`). Always present, so baseline comparisons, Sleep Debt, and Sleep Need work even on a fresh install.
 - **`archiveDays`** — the locally cached, encrypted per-day archive (`electron/health-cache.cjs`), normalized by `normalizeHealthArchive` in `src/data/normalize.ts` and loaded in `src/App.tsx`. Only contains days the user has actually synced/opened, so it is used only where `TrendPoint` genuinely lacks the field: Max Heart Rate (needs `heartRateMax`), intraday zones/Strain (needs `heartRateIntraday`), and Sleep Consistency (needs sleep start/end timestamps).
 
 ## Verifying them without a connected account
